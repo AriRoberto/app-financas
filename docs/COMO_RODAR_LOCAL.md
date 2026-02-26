@@ -1,6 +1,6 @@
 # Como rodar o app localmente
 
-Este projeto foi estruturado em duas aplicações:
+Este projeto possui duas aplicações:
 - `backend/`: API em Node.js + Express.
 - `frontend/`: interface web em React + Vite.
 
@@ -30,10 +30,15 @@ cd backend
 npm run dev
 ```
 
-A API ficará disponível em:
-- `http://localhost:3333/api/health`
-- `http://localhost:3333/api/dashboard`
-- `http://localhost:3333/api/suggestions`
+API disponível em:
+- `GET /api/health`
+- `GET /api/family-members`
+- `GET /api/transactions`
+- `POST /api/transactions`
+- `GET /api/dashboard`
+- `GET /api/suggestions`
+
+Base URL: `http://localhost:3333`
 
 ## 3) Rodar o frontend
 
@@ -46,14 +51,18 @@ npm run dev
 Abra no navegador:
 - `http://localhost:5173`
 
-## 4) Configuração opcional de API
+## 4) Como cadastrar seus gastos e os da esposa
+No frontend, use o formulário **"Lançar receita/despesa"**:
+1. Selecione o membro (`Você` ou `Esposa`).
+2. Escolha o tipo (`Despesa` ou `Receita`).
+3. Preencha categoria, descrição, valor e data.
+4. Clique em **Salvar lançamento**.
 
-Por padrão, o frontend consome `http://localhost:3333`.
-Se precisar alterar, rode com variável:
-
-```bash
-VITE_API_URL=http://localhost:3333 npm run dev
-```
+Após salvar, o painel atualiza automaticamente com:
+- resumo geral do mês;
+- resumo por membro da família;
+- distribuição por categoria;
+- últimos lançamentos.
 
 ## Estrutura de pastas
 

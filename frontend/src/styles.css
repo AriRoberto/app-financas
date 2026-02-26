@@ -1,7 +1,7 @@
 :root {
   font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-  color: #101828;
-  background: #f6f8fb;
+  color: #0f172a;
+  background: radial-gradient(circle at top, #e0ecff, #f4f7fb 45%);
 }
 
 * {
@@ -12,73 +12,209 @@ body {
   margin: 0;
 }
 
-.container {
-  max-width: 1000px;
+.page {
+  max-width: 1120px;
   margin: 0 auto;
-  padding: 24px;
+  padding: 28px;
+}
+
+.hero {
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  align-items: stretch;
+  margin-bottom: 18px;
+}
+
+.badge {
+  margin: 0;
+  font-size: 0.82rem;
+  color: #1d4ed8;
+  font-weight: 700;
+}
+
+h1 {
+  margin: 8px 0;
 }
 
 .subtitle {
-  color: #475467;
-  margin-top: 4px;
+  margin: 0;
+  color: #475569;
+  max-width: 700px;
+}
+
+.hero-card {
+  min-width: 220px;
+  background: linear-gradient(135deg, #1d4ed8, #7c3aed);
+  color: #fff;
+  border-radius: 14px;
+  padding: 16px;
+  display: grid;
+  gap: 6px;
+}
+
+.hero-card p,
+.hero-card span {
+  margin: 0;
+  opacity: 0.92;
+}
+
+.hero-card strong {
+  font-size: 1.3rem;
+}
+
+.cards,
+.member-grid,
+.content-grid {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 12px;
 }
 
 .cards {
-  margin-top: 20px;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.member-grid {
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+}
+
+.content-grid {
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
 }
 
 .card,
+.member-card,
 .panel {
-  background: white;
-  border: 1px solid #eaecf0;
-  border-radius: 12px;
+  border: 1px solid #dbe4f0;
+  border-radius: 14px;
+  background: #fff;
   padding: 16px;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.04);
 }
 
-.card h2 {
+.card p {
   margin: 0;
-  font-size: 1rem;
-  color: #475467;
+  color: #475569;
+  font-size: 0.95rem;
 }
 
 .card strong {
   display: block;
-  margin-top: 8px;
-  font-size: 1.25rem;
+  margin-top: 6px;
+  font-size: 1.5rem;
 }
 
-.grid {
-  margin-top: 16px;
+.card.expense strong,
+.negative {
+  color: #b42318;
+}
+
+.positive {
+  color: #067647;
+}
+
+.member-card h3 {
+  margin: 0 0 8px;
+}
+
+.member-card p {
+  margin: 4px 0;
+  color: #334155;
+}
+
+.panel h2 {
+  margin: 0 0 14px;
+  font-size: 1.1rem;
+}
+
+.form-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
 }
 
-.panel h3 {
-  margin-top: 0;
+label {
+  display: grid;
+  gap: 6px;
+  font-size: 0.88rem;
+  color: #334155;
 }
 
-.panel ul {
+input,
+select,
+button {
+  border: 1px solid #cdd8e6;
+  border-radius: 10px;
+  padding: 10px;
+  font-size: 0.95rem;
+}
+
+button {
+  grid-column: 1 / -1;
+  background: #1d4ed8;
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.category-list,
+.suggestions {
   margin: 0;
-  padding-left: 20px;
+  padding-left: 18px;
 }
 
-.panel li {
-  margin-bottom: 8px;
+.category-list li,
+.suggestions li {
+  margin-bottom: 10px;
 }
 
-.panel li span {
-  margin-right: 8px;
+.category-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.progress {
+  background: #e2e8f0;
+  border-radius: 999px;
+  height: 8px;
+  overflow: hidden;
+}
+
+.progress div {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #3b82f6, #22c55e);
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  text-align: left;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 8px;
+  font-size: 0.88rem;
 }
 
 .highlight {
-  margin-top: 16px;
-  background: #eaf6ff;
-  border: 1px solid #b2ddff;
-  color: #0c4a6e;
+  margin-top: 8px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #1e3a8a;
   border-radius: 12px;
   padding: 14px;
 }
@@ -89,4 +225,15 @@ body {
   border: 1px solid #fecdca;
   padding: 12px;
   border-radius: 8px;
+  margin-bottom: 12px;
+}
+
+@media (max-width: 900px) {
+  .hero {
+    flex-direction: column;
+  }
+
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
 }
