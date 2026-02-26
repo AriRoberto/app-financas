@@ -7,59 +7,116 @@ const currency = new Intl.NumberFormat('pt-BR', {
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3333';
 
+function currentMonth() {
+  return new Date().toISOString().slice(0, 7);
+}
+
 const initialForm = {
   memberId: 'you',
   type: 'expense',
-  category: '',
+  category: 'Alimentação',
   description: '',
   amount: '',
-  date: new Date().toISOString().slice(0, 10)
+  month: currentMonth(),
+  date: ''
 };
 
 function App() {
   const [dashboard, setDashboard] = useState(null);
   const [suggestions, setSuggestions] = useState([]);
   const [members, setMembers] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [months, setMonths] = useState([]);
+  const [selectedMonth, setSelectedMonth] = useState(currentMonth());
   const [transactions, setTransactions] = useState([]);
   const [form, setForm] = useState(initialForm);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  async function loadAll() {
+  async function loadStaticData() {
+    const [membersRes, categoriesRes, monthsRes] = await Promise.all([
+      fetch(`${API_URL}/api/family-members`),
+      fetch(`${API_URL}/api/categories`),
+      fetch(`${API_URL}/api/months`)
+    ]);
+
+    if (!membersRes.ok || !categoriesRes.ok || !monthsRes.ok) {
+      throw new Error('Não foi possível carregar os dados de configuração.');
+    }
+
+    const membersData = await membersRes.json();
+    const categoriesData = await categoriesRes.json();
+    const monthsData = await monthsRes.json();
+
+    const availableMonths = monthsData.months || [];
+    const preferredMonth = availableMonths.includes(selectedMonth)
+      ? selectedMonth
+      : availableMonths[availableMonths.length - 1] || selectedMonth;
+
+    setMembers(membersData.members || []);
+    setCategories(categoriesData.categories || []);
+    setMonths(availableMonths);
+    setSelectedMonth(preferredMonth);
+    setForm((old) => ({
+      ...old,
+      memberId: membersData.members?.[0]?.id || 'you',
+      category: categoriesData.categories?.[0] || 'Outros',
+      month: preferredMonth
+    }));
+
+    return preferredMonth;
+  }
+
+  async function loadFinancialData(month) {
+    const [dashboardRes, suggestionsRes, transactionsRes] = await Promise.all([
+      fetch(`${API_URL}/api/dashboard?month=${month}`),
+      fetch(`${API_URL}/api/suggestions?month=${month}`),
+      fetch(`${API_URL}/api/transactions?month=${month}`)
+    ]);
+
+    if (!dashboardRes.ok || !suggestionsRes.ok || !transactionsRes.ok) {
+      throw new Error('Não foi possível carregar os dados financeiros.');
+    }
+
+    const dashboardData = await dashboardRes.json();
+    const suggestionsData = await suggestionsRes.json();
+    const transactionsData = await transactionsRes.json();
+
+    setDashboard(dashboardData);
+    setSuggestions(suggestionsData.suggestions || []);
+    setTransactions(transactionsData.transactions || []);
+    setMonths(dashboardData.availableMonths || []);
+  }
+
+  async function boot() {
     setLoading(true);
     setError('');
     try {
-      const [dashboardRes, suggestionsRes, membersRes, transactionsRes] = await Promise.all([
-        fetch(`${API_URL}/api/dashboard`),
-        fetch(`${API_URL}/api/suggestions`),
-        fetch(`${API_URL}/api/family-members`),
-        fetch(`${API_URL}/api/transactions`)
-      ]);
-
-      if (!dashboardRes.ok || !suggestionsRes.ok || !membersRes.ok || !transactionsRes.ok) {
-        throw new Error('Não foi possível carregar os dados do app.');
-      }
-
-      const dashboardData = await dashboardRes.json();
-      const suggestionsData = await suggestionsRes.json();
-      const membersData = await membersRes.json();
-      const transactionsData = await transactionsRes.json();
-
-      setDashboard(dashboardData);
-      setSuggestions(suggestionsData.suggestions || []);
-      setMembers(membersData.members || []);
-      setTransactions(transactionsData.transactions || []);
+      const preferredMonth = await loadStaticData();
+      await loadFinancialData(preferredMonth);
     } catch (err) {
-      setError(err.message || 'Erro ao buscar dados.');
+      setError(err.message || 'Erro ao carregar dados.');
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    loadAll();
+    boot();
   }, []);
+
+  async function handleMonthChange(month) {
+    setSelectedMonth(month);
+    setForm((old) => ({ ...old, month }));
+
+    try {
+      await loadFinancialData(month);
+      setError('');
+    } catch (err) {
+      setError(err.message || 'Erro ao atualizar mês.');
+    }
+  }
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -67,49 +124,54 @@ function App() {
     setError('');
 
     try {
+      const payload = {
+        ...form,
+        amount: Number(form.amount)
+      };
+
       const response = await fetch(`${API_URL}/api/transactions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...form,
-          amount: Number(form.amount)
-        })
+        body: JSON.stringify(payload)
       });
 
       if (!response.ok) {
         const data = await response.json();
-        throw new Error(data.message || 'Erro ao salvar transação.');
+        throw new Error(data.message || 'Erro ao salvar lançamento.');
       }
 
-      setForm({ ...initialForm, memberId: form.memberId, type: form.type });
-      await loadAll();
+      await boot();
+      setForm((old) => ({ ...old, description: '', amount: '', date: '' }));
     } catch (err) {
-      setError(err.message || 'Erro ao salvar transação.');
+      setError(err.message || 'Erro ao salvar lançamento.');
     } finally {
       setSaving(false);
     }
   }
 
-  const topCategory = useMemo(() => {
-    if (!dashboard?.categories?.length) return null;
-    return dashboard.categories[0];
-  }, [dashboard]);
+  const topCategory = useMemo(() => dashboard?.categories?.[0] || null, [dashboard]);
 
-  if (loading) return <main className="page"><p>Carregando dashboard familiar...</p></main>;
-  if (error && !dashboard) return <main className="page"><p className="error">{error}</p></main>;
+  if (loading) return <main className="page"><p>Carregando painel financeiro...</p></main>;
+  if (!dashboard) return <main className="page"><p className="error">{error || 'Sem dados disponíveis.'}</p></main>;
 
   return (
     <main className="page">
       <section className="hero">
         <div>
-          <p className="badge">Planejamento Familiar</p>
-          <h1>Controle de Finanças: você + esposa</h1>
-          <p className="subtitle">Acompanhe despesas de cada membro, veja os totais do mês e registre novas movimentações em segundos.</p>
+          <p className="badge">Cadastro e Comparação de Despesas</p>
+          <h1>Controle Familiar com Histórico Mensal</h1>
+          <p className="subtitle">Cadastre despesas de meses anteriores para comparar evolução e gerar projeção do próximo mês.</p>
         </div>
         <div className="hero-card">
-          <p>Mês de referência</p>
-          <strong>{dashboard.month}</strong>
-          <span>Taxa de poupança {dashboard.savingsRate}%</span>
+          <label>
+            Mês analisado
+            <select value={selectedMonth} onChange={(event) => handleMonthChange(event.target.value)}>
+              {months.map((month) => (
+                <option key={month} value={month}>{month}</option>
+              ))}
+            </select>
+          </label>
+          <span>Projeção próxima despesa: {currency.format(dashboard.projection.projectedNextMonthExpenses)}</span>
         </div>
       </section>
 
@@ -117,102 +179,72 @@ function App() {
 
       <section className="cards">
         <article className="card">
-          <p>Receitas</p>
+          <p>Receitas do mês</p>
           <strong>{currency.format(dashboard.income)}</strong>
         </article>
         <article className="card expense">
-          <p>Despesas</p>
+          <p>Despesas do mês</p>
           <strong>{currency.format(dashboard.expenses)}</strong>
         </article>
         <article className="card">
           <p>Saldo</p>
           <strong>{currency.format(dashboard.balance)}</strong>
         </article>
-      </section>
-
-      <section className="member-grid">
-        {dashboard.byMember.map((member) => (
-          <article key={member.memberId} className="member-card">
-            <h3>{member.memberName}</h3>
-            <p>Receitas: <strong>{currency.format(member.income)}</strong></p>
-            <p>Despesas: <strong>{currency.format(member.expenses)}</strong></p>
-            <p>Saldo: <strong>{currency.format(member.balance)}</strong></p>
-          </article>
-        ))}
+        <article className="card">
+          <p>Comparação com mês anterior</p>
+          <strong className={dashboard.comparison.differenceFromPrevious > 0 ? 'negative' : 'positive'}>
+            {dashboard.comparison.previousMonth
+              ? `${dashboard.comparison.differenceFromPrevious > 0 ? '+' : ''}${currency.format(dashboard.comparison.differenceFromPrevious)}`
+              : 'Sem histórico'}
+          </strong>
+        </article>
       </section>
 
       <section className="content-grid">
         <article className="panel">
-          <h2>Lançar receita/despesa</h2>
+          <h2>Tela de cadastro de despesas</h2>
           <form onSubmit={handleSubmit} className="form-grid">
             <label>
               Membro
-              <select
-                value={form.memberId}
-                onChange={(event) => setForm((old) => ({ ...old, memberId: event.target.value }))}
-              >
-                {members.map((member) => (
-                  <option key={member.id} value={member.id}>{member.name}</option>
-                ))}
+              <select value={form.memberId} onChange={(event) => setForm((old) => ({ ...old, memberId: event.target.value }))}>
+                {members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}
               </select>
             </label>
-
             <label>
               Tipo
-              <select
-                value={form.type}
-                onChange={(event) => setForm((old) => ({ ...old, type: event.target.value }))}
-              >
+              <select value={form.type} onChange={(event) => setForm((old) => ({ ...old, type: event.target.value }))}>
                 <option value="expense">Despesa</option>
                 <option value="income">Receita</option>
               </select>
             </label>
-
             <label>
               Categoria
-              <input
-                value={form.category}
-                onChange={(event) => setForm((old) => ({ ...old, category: event.target.value }))}
-                placeholder="Ex.: Mercado"
-              />
+              <select value={form.category} onChange={(event) => setForm((old) => ({ ...old, category: event.target.value }))}>
+                {categories.map((category) => <option key={category} value={category}>{category}</option>)}
+              </select>
             </label>
-
+            <label>
+              Mês de competência
+              <input type="month" value={form.month} onChange={(event) => setForm((old) => ({ ...old, month: event.target.value }))} />
+            </label>
             <label>
               Descrição
-              <input
-                value={form.description}
-                onChange={(event) => setForm((old) => ({ ...old, description: event.target.value }))}
-                placeholder="Ex.: Compra semanal"
-              />
+              <input value={form.description} onChange={(event) => setForm((old) => ({ ...old, description: event.target.value }))} placeholder="Ex.: Mercado semanal" />
             </label>
-
             <label>
               Valor (R$)
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                value={form.amount}
-                onChange={(event) => setForm((old) => ({ ...old, amount: event.target.value }))}
-                placeholder="0,00"
-              />
+              <input type="number" min="0" step="0.01" value={form.amount} onChange={(event) => setForm((old) => ({ ...old, amount: event.target.value }))} placeholder="0,00" />
             </label>
-
             <label>
-              Data
-              <input
-                type="date"
-                value={form.date}
-                onChange={(event) => setForm((old) => ({ ...old, date: event.target.value }))}
-              />
+              Data (opcional)
+              <input type="date" value={form.date} onChange={(event) => setForm((old) => ({ ...old, date: event.target.value }))} />
             </label>
-
             <button type="submit" disabled={saving}>{saving ? 'Salvando...' : 'Salvar lançamento'}</button>
           </form>
         </article>
 
         <article className="panel">
-          <h2>Para onde o dinheiro está indo</h2>
+          <h2>Categorias e projeção de gastos</h2>
           <ul className="category-list">
             {dashboard.categories.map((category) => {
               const percent = dashboard.expenses > 0 ? (category.amount / dashboard.expenses) * 100 : 0;
@@ -222,26 +254,46 @@ function App() {
                     <span>{category.name}</span>
                     <strong>{currency.format(category.amount)}</strong>
                   </div>
-                  <div className="progress">
-                    <div style={{ width: `${Math.min(percent, 100)}%` }} />
-                  </div>
+                  <div className="progress"><div style={{ width: `${Math.min(percent, 100)}%` }} /></div>
                 </li>
               );
             })}
           </ul>
+
+          <h3>Histórico mensal</h3>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Mês</th>
+                  <th>Receitas</th>
+                  <th>Despesas</th>
+                  <th>Saldo</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dashboard.monthlyHistory.map((item) => (
+                  <tr key={item.month}>
+                    <td>{item.month}</td>
+                    <td className="positive">{currency.format(item.income)}</td>
+                    <td className="negative">{currency.format(item.expenses)}</td>
+                    <td>{currency.format(item.balance)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </article>
       </section>
 
       <section className="content-grid">
         <article className="panel">
           <h2>Sugestões automáticas</h2>
-          <ul className="suggestions">
-            {suggestions.map((suggestion) => <li key={suggestion}>{suggestion}</li>)}
-          </ul>
+          <ul className="suggestions">{suggestions.map((text) => <li key={text}>{text}</li>)}</ul>
         </article>
 
         <article className="panel">
-          <h2>Últimos lançamentos</h2>
+          <h2>Lançamentos do mês {selectedMonth}</h2>
           <div className="table-wrap">
             <table>
               <thead>
@@ -255,7 +307,7 @@ function App() {
                 </tr>
               </thead>
               <tbody>
-                {transactions.slice(0, 8).map((item) => {
+                {transactions.map((item) => {
                   const member = members.find((m) => m.id === item.memberId);
                   return (
                     <tr key={item.id}>
@@ -276,7 +328,7 @@ function App() {
 
       {topCategory ? (
         <footer className="highlight">
-          Maior categoria de despesa no mês: <strong>{topCategory.name}</strong> ({currency.format(topCategory.amount)}).
+          Maior categoria no mês selecionado: <strong>{topCategory.name}</strong> ({currency.format(topCategory.amount)}).
         </footer>
       ) : null}
     </main>

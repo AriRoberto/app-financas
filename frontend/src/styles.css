@@ -1,7 +1,7 @@
 :root {
   font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
   color: #0f172a;
-  background: radial-gradient(circle at top, #e0ecff, #f4f7fb 45%);
+  background: radial-gradient(circle at top, #dbeafe, #f8fafc 46%);
 }
 
 * {
@@ -13,7 +13,7 @@ body {
 }
 
 .page {
-  max-width: 1120px;
+  max-width: 1140px;
   margin: 0 auto;
   padding: 28px;
 }
@@ -37,6 +37,11 @@ h1 {
   margin: 8px 0;
 }
 
+h3 {
+  margin: 16px 0 10px;
+  font-size: 1rem;
+}
+
 .subtitle {
   margin: 0;
   color: #475569;
@@ -44,27 +49,31 @@ h1 {
 }
 
 .hero-card {
-  min-width: 220px;
+  min-width: 280px;
   background: linear-gradient(135deg, #1d4ed8, #7c3aed);
   color: #fff;
   border-radius: 14px;
   padding: 16px;
   display: grid;
-  gap: 6px;
+  gap: 10px;
+}
+
+.hero-card label {
+  color: #fff;
+  font-size: 0.85rem;
+}
+
+.hero-card select {
+  margin-top: 6px;
 }
 
 .hero-card p,
 .hero-card span {
   margin: 0;
-  opacity: 0.92;
-}
-
-.hero-card strong {
-  font-size: 1.3rem;
+  opacity: 0.95;
 }
 
 .cards,
-.member-grid,
 .content-grid {
   display: grid;
   gap: 12px;
@@ -72,25 +81,20 @@ h1 {
 }
 
 .cards {
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-}
-
-.member-grid {
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
 .content-grid {
-  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
 }
 
 .card,
-.member-card,
 .panel {
   border: 1px solid #dbe4f0;
   border-radius: 14px;
   background: #fff;
   padding: 16px;
-  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.04);
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.05);
 }
 
 .card p {
@@ -102,7 +106,7 @@ h1 {
 .card strong {
   display: block;
   margin-top: 6px;
-  font-size: 1.5rem;
+  font-size: 1.25rem;
 }
 
 .card.expense strong,
@@ -112,15 +116,6 @@ h1 {
 
 .positive {
   color: #067647;
-}
-
-.member-card h3 {
-  margin: 0 0 8px;
-}
-
-.member-card p {
-  margin: 4px 0;
-  color: #334155;
 }
 
 .panel h2 {
@@ -148,6 +143,7 @@ button {
   border-radius: 10px;
   padding: 10px;
   font-size: 0.95rem;
+  background: #fff;
 }
 
 button {

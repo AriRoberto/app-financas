@@ -1,9 +1,5 @@
 # Como rodar o app localmente
 
-Este projeto possui duas aplicações:
-- `backend/`: API em Node.js + Express.
-- `frontend/`: interface web em React + Vite.
-
 ## Pré-requisitos
 - Node.js 20+
 - npm 10+
@@ -22,65 +18,45 @@ cd ../frontend
 npm install
 ```
 
-## 2) Rodar o backend
+## 2) Rodar backend e frontend
 
-No terminal 1:
+Terminal 1:
 ```bash
 cd backend
 npm run dev
 ```
 
-API disponível em:
-- `GET /api/health`
-- `GET /api/family-members`
-- `GET /api/transactions`
-- `POST /api/transactions`
-- `GET /api/dashboard`
-- `GET /api/suggestions`
-
-Base URL: `http://localhost:3333`
-
-## 3) Rodar o frontend
-
-No terminal 2:
+Terminal 2:
 ```bash
 cd frontend
 npm run dev
 ```
 
-Abra no navegador:
-- `http://localhost:5173`
+Acesse: `http://localhost:5173`
 
-## 4) Como cadastrar seus gastos e os da esposa
-No frontend, use o formulário **"Lançar receita/despesa"**:
-1. Selecione o membro (`Você` ou `Esposa`).
-2. Escolha o tipo (`Despesa` ou `Receita`).
-3. Preencha categoria, descrição, valor e data.
-4. Clique em **Salvar lançamento**.
+## 3) Como cadastrar despesas (inclusive meses anteriores)
+Na tela **"Tela de cadastro de despesas"**:
+1. Escolha o membro (Você ou Esposa).
+2. Escolha o tipo (Despesa/Receita).
+3. Selecione a categoria.
+4. Defina o **Mês de competência** (`YYYY-MM`) para lançar meses anteriores.
+5. Informe descrição e valor.
+6. Clique em **Salvar lançamento**.
 
-Após salvar, o painel atualiza automaticamente com:
-- resumo geral do mês;
-- resumo por membro da família;
-- distribuição por categoria;
-- últimos lançamentos.
+## 4) Comparação e projeção
+- No card azul do topo, selecione o **Mês analisado**.
+- O painel recalcula:
+  - despesas do mês,
+  - comparação com mês anterior,
+  - histórico mensal,
+  - projeção do próximo mês.
 
-## Estrutura de pastas
-
-```text
-app-financas/
-├── backend/
-│   ├── package.json
-│   └── src/
-│       └── server.js
-├── frontend/
-│   ├── index.html
-│   ├── package.json
-│   ├── vite.config.js
-│   └── src/
-│       ├── App.jsx
-│       ├── main.jsx
-│       └── styles.css
-├── docs/
-│   └── COMO_RODAR_LOCAL.md
-└── README.md
-```
+## Rotas da API
+- `GET /api/health`
+- `GET /api/family-members`
+- `GET /api/categories`
+- `GET /api/months`
+- `GET /api/transactions?month=YYYY-MM`
+- `POST /api/transactions`
+- `GET /api/dashboard?month=YYYY-MM`
+- `GET /api/suggestions?month=YYYY-MM`
