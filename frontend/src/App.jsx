@@ -21,11 +21,19 @@ const initialForm = {
   date: ''
 };
 
+function labelByType(type) {
+  if (type === 'income') return 'Receita';
+  if (type === 'investment') return 'Investimento';
+  return 'Despesa';
+}
+
 function App() {
   const [dashboard, setDashboard] = useState(null);
   const [suggestions, setSuggestions] = useState([]);
   const [members, setMembers] = useState([]);
-  const [categories, setCategories] = useState([]);
+  const [expenseCategories, setExpenseCategories] = useState([]);
+  const [investmentCategories, setInvestmentCategories] = useState([]);
+  const [descriptionTemplates, setDescriptionTemplates] = useState([]);
   const [months, setMonths] = useState([]);
   const [selectedMonth, setSelectedMonth] = useState(currentMonth());
   const [transactions, setTransactions] = useState([]);
@@ -34,6 +42,23 @@ function App() {
   const [saving, setSaving] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [error, setError] = useState('');
+
+  const currentCategories = useMemo(() => {
+    if (form.type === 'investment') return investmentCategories;
+    if (form.type === 'income') return ['Salário', 'Renda extra', 'Freelance', 'Bônus'];
+    return expenseCategories;
+  }, [form.type, expenseCategories, investmentCategories]);
+
+  async function loadDescriptionTemplates(type, category) {
+    const response = await fetch(`${API_URL}/api/description-templates?type=${type}&category=${encodeURIComponent(category || '')}`);
+
+    if (!response.ok) {
+      throw new Error('Não foi possível carregar sugestões de descrição.');
+    }
+
+    const data = await response.json();
+    setDescriptionTemplates(data.templates || []);
+  }
 
   async function loadStaticData() {
     const [membersRes, categoriesRes, monthsRes] = await Promise.all([
@@ -55,17 +80,25 @@ function App() {
       ? selectedMonth
       : availableMonths[availableMonths.length - 1] || selectedMonth;
 
+    const expenseData = categoriesData.expenseCategories || categoriesData.categories || [];
+    const investmentData = categoriesData.investmentCategories || [];
+
     setMembers(membersData.members || []);
-    setCategories(categoriesData.categories || []);
+    setExpenseCategories(expenseData);
+    setInvestmentCategories(investmentData);
     setMonths(availableMonths);
     setSelectedMonth(preferredMonth);
+
+    const nextCategory = expenseData[0] || 'Outros';
     setForm((old) => ({
       ...old,
       memberId: membersData.members?.[0]?.id || 'you',
-      category: categoriesData.categories?.[0] || 'Outros',
+      type: 'expense',
+      category: nextCategory,
       month: preferredMonth || currentMonth()
     }));
 
+    await loadDescriptionTemplates('expense', nextCategory);
     return preferredMonth;
   }
 
@@ -116,6 +149,17 @@ function App() {
       setError('');
     } catch (err) {
       setError(err.message || 'Erro ao atualizar mês.');
+    }
+  }
+
+  async function handleTypeOrCategoryChange(nextType, nextCategory) {
+    setForm((old) => ({ ...old, type: nextType, category: nextCategory }));
+
+    try {
+      await loadDescriptionTemplates(nextType, nextCategory);
+    } catch (err) {
+      setDescriptionTemplates([]);
+      setError(err.message || 'Erro ao atualizar sugestões de descrição.');
     }
   }
 
@@ -187,9 +231,9 @@ function App() {
     <main className="page">
       <section className="hero">
         <div>
-          <p className="badge">Cadastro e Comparação de Despesas</p>
+          <p className="badge">Cadastro e Comparação de Despesas + Investimentos</p>
           <h1>Controle Familiar com Histórico Mensal</h1>
-          <p className="subtitle">Cadastre despesas de meses anteriores para comparar evolução e gerar projeção do próximo mês.</p>
+          <p className="subtitle">Cadastre despesas, investimentos e receitas para comparar evolução, visualizar renda individual e projeção de saídas.</p>
         </div>
         <div className="hero-card">
           <label>
@@ -200,7 +244,7 @@ function App() {
               ))}
             </select>
           </label>
-          <span>Projeção próxima despesa: {currency.format(dashboard.projection.projectedNextMonthExpenses)}</span>
+          <span>Projeção de saídas no próximo mês: {currency.format(dashboard.projection.projectedNextMonthOutflow)}</span>
         </div>
       </section>
 
@@ -208,19 +252,23 @@ function App() {
 
       <section className="cards">
         <article className="card">
-          <p>Receitas do mês</p>
+          <p>Receita total da família</p>
           <strong>{currency.format(dashboard.income)}</strong>
         </article>
         <article className="card expense">
           <p>Despesas do mês</p>
           <strong>{currency.format(dashboard.expenses)}</strong>
         </article>
+        <article className="card investment">
+          <p>Investimentos do mês</p>
+          <strong>{currency.format(dashboard.investments)}</strong>
+        </article>
         <article className="card">
-          <p>Saldo</p>
+          <p>Saldo final do mês</p>
           <strong>{currency.format(dashboard.balance)}</strong>
         </article>
         <article className="card">
-          <p>Comparação com mês anterior</p>
+          <p>Comparação de saídas com mês anterior</p>
           <strong className={dashboard.comparison.differenceFromPrevious > 0 ? 'negative' : 'positive'}>
             {dashboard.comparison.previousMonth
               ? `${dashboard.comparison.differenceFromPrevious > 0 ? '+' : ''}${currency.format(dashboard.comparison.differenceFromPrevious)}`
@@ -229,11 +277,21 @@ function App() {
         </article>
       </section>
 
+      <section className="member-income-grid">
+        {dashboard.byMember.map((member) => (
+          <article className="card" key={member.memberId}>
+            <p>Receita individual - {member.memberName}</p>
+            <strong>{currency.format(member.income)}</strong>
+            <small>Despesas: {currency.format(member.expenses)} | Investimentos: {currency.format(member.investments)}</small>
+          </article>
+        ))}
+      </section>
+
       <section className="content-grid">
         <article className="panel">
-          <h2>Tela de cadastro de despesas</h2>
+          <h2>Tela de cadastro de lançamentos</h2>
           <p className="panel-help">
-            Quer começar do zero com os seus valores reais? Clique em <strong>"Zerar dados de exemplo"</strong> e depois cadastre as receitas/despesas do seu histórico.
+            Quer começar do zero com os seus valores reais? Clique em <strong>"Zerar dados de exemplo"</strong> e depois cadastre despesas, investimentos e receitas.
           </p>
           <form onSubmit={handleSubmit} className="form-grid">
             <label>
@@ -244,15 +302,34 @@ function App() {
             </label>
             <label>
               Tipo
-              <select value={form.type} onChange={(event) => setForm((old) => ({ ...old, type: event.target.value }))}>
+              <select
+                value={form.type}
+                onChange={async (event) => {
+                  const nextType = event.target.value;
+                  const categoriesByType = nextType === 'investment'
+                    ? investmentCategories
+                    : nextType === 'income'
+                      ? ['Salário', 'Renda extra', 'Freelance', 'Bônus']
+                      : expenseCategories;
+                  const nextCategory = categoriesByType[0] || 'Outros';
+                  await handleTypeOrCategoryChange(nextType, nextCategory);
+                }}
+              >
                 <option value="expense">Despesa</option>
+                <option value="investment">Investimento</option>
                 <option value="income">Receita</option>
               </select>
             </label>
             <label>
               Categoria
-              <select value={form.category} onChange={(event) => setForm((old) => ({ ...old, category: event.target.value }))}>
-                {categories.map((category) => <option key={category} value={category}>{category}</option>)}
+              <select
+                value={form.category}
+                onChange={async (event) => {
+                  const nextCategory = event.target.value;
+                  await handleTypeOrCategoryChange(form.type, nextCategory);
+                }}
+              >
+                {currentCategories.map((category) => <option key={category} value={category}>{category}</option>)}
               </select>
             </label>
             <label>
@@ -260,8 +337,16 @@ function App() {
               <input type="month" value={form.month} onChange={(event) => setForm((old) => ({ ...old, month: event.target.value }))} />
             </label>
             <label>
-              Descrição
-              <input value={form.description} onChange={(event) => setForm((old) => ({ ...old, description: event.target.value }))} placeholder="Ex.: Mercado semanal" />
+              Descrição (com modelos + digitação livre)
+              <input
+                list="description-models"
+                value={form.description}
+                onChange={(event) => setForm((old) => ({ ...old, description: event.target.value }))}
+                placeholder="Ex.: Mercado semanal"
+              />
+              <datalist id="description-models">
+                {descriptionTemplates.map((template) => <option key={template} value={template} />)}
+              </datalist>
             </label>
             <label>
               Valor (R$)
@@ -281,10 +366,10 @@ function App() {
         </article>
 
         <article className="panel">
-          <h2>Categorias e projeção de gastos</h2>
+          <h2>Categorias e projeção de saídas</h2>
           <ul className="category-list">
             {dashboard.categories.map((category) => {
-              const percent = dashboard.expenses > 0 ? (category.amount / dashboard.expenses) * 100 : 0;
+              const percent = dashboard.outflow > 0 ? (category.amount / dashboard.outflow) * 100 : 0;
               return (
                 <li key={category.name}>
                   <div className="category-row">
@@ -305,6 +390,7 @@ function App() {
                   <th>Mês</th>
                   <th>Receitas</th>
                   <th>Despesas</th>
+                  <th>Investimentos</th>
                   <th>Saldo</th>
                 </tr>
               </thead>
@@ -314,6 +400,7 @@ function App() {
                     <td>{item.month}</td>
                     <td className="positive">{currency.format(item.income)}</td>
                     <td className="negative">{currency.format(item.expenses)}</td>
+                    <td className="investment-text">{currency.format(item.investments)}</td>
                     <td>{currency.format(item.balance)}</td>
                   </tr>
                 ))}
@@ -350,10 +437,10 @@ function App() {
                     <tr key={item.id}>
                       <td>{item.date}</td>
                       <td>{member?.name || item.memberId}</td>
-                      <td>{item.type === 'income' ? 'Receita' : 'Despesa'}</td>
+                      <td>{labelByType(item.type)}</td>
                       <td>{item.category}</td>
                       <td>{item.description}</td>
-                      <td className={item.type === 'income' ? 'positive' : 'negative'}>{currency.format(item.amount)}</td>
+                      <td className={item.type === 'income' ? 'positive' : item.type === 'investment' ? 'investment-text' : 'negative'}>{currency.format(item.amount)}</td>
                     </tr>
                   );
                 })}
@@ -365,7 +452,7 @@ function App() {
 
       {topCategory ? (
         <footer className="highlight">
-          Maior categoria no mês selecionado: <strong>{topCategory.name}</strong> ({currency.format(topCategory.amount)}).
+          Maior categoria de saída no mês selecionado: <strong>{topCategory.name}</strong> ({currency.format(topCategory.amount)}).
         </footer>
       ) : null}
     </main>

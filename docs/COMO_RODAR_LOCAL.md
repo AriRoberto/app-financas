@@ -34,14 +34,14 @@ npm run dev
 
 Acesse: `http://localhost:5173`
 
-## 3) Como cadastrar despesas (inclusive meses anteriores)
-Na tela **"Tela de cadastro de despesas"**:
+## 3) Como cadastrar lançamentos (inclusive meses anteriores)
+Na tela **"Tela de cadastro de lançamentos"**:
 1. Escolha o membro (Você ou Esposa).
-2. Escolha o tipo (Despesa/Receita).
+2. Escolha o tipo (Despesa/Investimento/Receita).
 3. Selecione a categoria.
-4. Defina o **Mês de competência** (`YYYY-MM`) para lançar meses anteriores.
-5. Informe descrição e valor.
-6. Clique em **Salvar lançamento**.
+4. Escolha uma descrição sugerida (modelo) ou digite sua própria descrição.
+5. Defina o **Mês de competência** (`YYYY-MM`) para lançar meses anteriores.
+6. Informe valor e clique em **Salvar lançamento**.
 
 
 ## 3.1) Zerar os valores de modelo e começar com dados reais
@@ -65,8 +65,10 @@ curl -X POST http://localhost:3333/api/transactions/seed
 ## 4) Comparação e projeção
 - No card azul do topo, selecione o **Mês analisado**.
 - O painel recalcula:
-  - despesas do mês,
-  - comparação com mês anterior,
+  - receita total familiar,
+  - receita individual por membro,
+  - despesas e investimentos do mês,
+  - comparação de saídas com mês anterior,
   - histórico mensal,
   - projeção do próximo mês.
 
@@ -74,6 +76,7 @@ curl -X POST http://localhost:3333/api/transactions/seed
 - `GET /api/health`
 - `GET /api/family-members`
 - `GET /api/categories`
+- `GET /api/description-templates?type=expense|investment|income&category=...`
 - `GET /api/months`
 - `GET /api/transactions?month=YYYY-MM`
 - `POST /api/transactions`
