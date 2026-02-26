@@ -32,6 +32,7 @@ function App() {
   const [form, setForm] = useState(initialForm);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const [error, setError] = useState('');
 
   async function loadStaticData() {
@@ -62,7 +63,7 @@ function App() {
       ...old,
       memberId: membersData.members?.[0]?.id || 'you',
       category: categoriesData.categories?.[0] || 'Outros',
-      month: preferredMonth
+      month: preferredMonth || currentMonth()
     }));
 
     return preferredMonth;
@@ -118,6 +119,33 @@ function App() {
     }
   }
 
+  async function handleClearDemoData() {
+    const confirmed = window.confirm('Isso vai apagar todos os lançamentos atuais, incluindo os de exemplo. Deseja continuar?');
+
+    if (!confirmed) return;
+
+    setResetting(true);
+    setError('');
+
+    try {
+      const response = await fetch(`${API_URL}/api/transactions`, { method: 'DELETE' });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.message || 'Erro ao limpar dados.');
+      }
+
+      const defaultMonth = currentMonth();
+      setSelectedMonth(defaultMonth);
+      await boot();
+      setForm((old) => ({ ...old, month: defaultMonth, description: '', amount: '', date: '' }));
+    } catch (err) {
+      setError(err.message || 'Erro ao limpar dados.');
+    } finally {
+      setResetting(false);
+    }
+  }
+
   async function handleSubmit(event) {
     event.preventDefault();
     setSaving(true);
@@ -150,6 +178,7 @@ function App() {
   }
 
   const topCategory = useMemo(() => dashboard?.categories?.[0] || null, [dashboard]);
+  const monthOptions = months.length ? months : [selectedMonth];
 
   if (loading) return <main className="page"><p>Carregando painel financeiro...</p></main>;
   if (!dashboard) return <main className="page"><p className="error">{error || 'Sem dados disponíveis.'}</p></main>;
@@ -166,7 +195,7 @@ function App() {
           <label>
             Mês analisado
             <select value={selectedMonth} onChange={(event) => handleMonthChange(event.target.value)}>
-              {months.map((month) => (
+              {monthOptions.map((month) => (
                 <option key={month} value={month}>{month}</option>
               ))}
             </select>
@@ -203,6 +232,9 @@ function App() {
       <section className="content-grid">
         <article className="panel">
           <h2>Tela de cadastro de despesas</h2>
+          <p className="panel-help">
+            Quer começar do zero com os seus valores reais? Clique em <strong>"Zerar dados de exemplo"</strong> e depois cadastre as receitas/despesas do seu histórico.
+          </p>
           <form onSubmit={handleSubmit} className="form-grid">
             <label>
               Membro
@@ -239,7 +271,12 @@ function App() {
               Data (opcional)
               <input type="date" value={form.date} onChange={(event) => setForm((old) => ({ ...old, date: event.target.value }))} />
             </label>
-            <button type="submit" disabled={saving}>{saving ? 'Salvando...' : 'Salvar lançamento'}</button>
+            <div className="form-actions">
+              <button type="submit" disabled={saving}>{saving ? 'Salvando...' : 'Salvar lançamento'}</button>
+              <button type="button" className="ghost danger" onClick={handleClearDemoData} disabled={resetting}>
+                {resetting ? 'Limpando...' : 'Zerar dados de exemplo'}
+              </button>
+            </div>
           </form>
         </article>
 

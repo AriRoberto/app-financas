@@ -43,6 +43,25 @@ Na tela **"Tela de cadastro de despesas"**:
 5. Informe descrição e valor.
 6. Clique em **Salvar lançamento**.
 
+
+## 3.1) Zerar os valores de modelo e começar com dados reais
+Você pode fazer isso de duas formas:
+
+### Pelo navegador (recomendado)
+1. Na tela **"Tela de cadastro de despesas"**, clique em **Zerar dados de exemplo**.
+2. Confirme a ação.
+3. Cadastre seus valores reais usando o formulário.
+
+### Pela API
+```bash
+curl -X DELETE http://localhost:3333/api/transactions
+```
+
+Se quiser restaurar os dados de exemplo depois:
+```bash
+curl -X POST http://localhost:3333/api/transactions/seed
+```
+
 ## 4) Comparação e projeção
 - No card azul do topo, selecione o **Mês analisado**.
 - O painel recalcula:
@@ -58,5 +77,7 @@ Na tela **"Tela de cadastro de despesas"**:
 - `GET /api/months`
 - `GET /api/transactions?month=YYYY-MM`
 - `POST /api/transactions`
+- `DELETE /api/transactions`
+- `POST /api/transactions/seed`
 - `GET /api/dashboard?month=YYYY-MM`
 - `GET /api/suggestions?month=YYYY-MM`

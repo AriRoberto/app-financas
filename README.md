@@ -15,6 +15,7 @@ Projeto full-stack para controlar receitas e despesas da família com foco em:
 - **Dashboard por mês selecionado** com cards de receitas, despesas, saldo e variação versus mês anterior.
 - **Histórico mensal** para comparação direta dos meses já cadastrados.
 - **Projeção de despesas** do próximo mês com base na média dos últimos meses.
+- **Botão para zerar dados de exemplo** e iniciar do zero com valores reais.
 
 ## Endpoints principais
 - `GET /api/dashboard?month=YYYY-MM`
@@ -24,6 +25,8 @@ Projeto full-stack para controlar receitas e despesas da família com foco em:
 - `GET /api/family-members`
 - `GET /api/categories`
 - `GET /api/months`
+- `DELETE /api/transactions` (zera todos os lançamentos, incluindo dados de modelo)
+- `POST /api/transactions/seed` (restaura os dados de modelo)
 
 ## Como rodar
 Siga `docs/COMO_RODAR_LOCAL.md`.

@@ -23,7 +23,7 @@ const expenseCategories = [
   'Outros'
 ];
 
-let transactions = [
+const sampleTransactions = [
   { id: 't1', memberId: 'you', type: 'income', category: 'Salário', description: 'Salário mensal', amount: 8500, month: '2025-12', date: '2025-12-05' },
   { id: 't2', memberId: 'wife', type: 'income', category: 'Salário', description: 'Salário mensal', amount: 4000, month: '2025-12', date: '2025-12-05' },
   { id: 't3', memberId: 'you', type: 'expense', category: 'Moradia', description: 'Aluguel', amount: 2500, month: '2025-12', date: '2025-12-06' },
@@ -46,6 +46,12 @@ let transactions = [
   { id: 't18', memberId: 'wife', type: 'expense', category: 'Lazer', description: 'Passeio família', amount: 930, month: '2026-02', date: '2026-02-13' }
 ];
 
+function cloneSampleTransactions() {
+  return sampleTransactions.map((item) => ({ ...item }));
+}
+
+let transactions = cloneSampleTransactions();
+
 function isValidMonth(value) {
   return /^\d{4}-(0[1-9]|1[0-2])$/.test(value);
 }
@@ -63,9 +69,10 @@ function getMonthTotals(month) {
 
 function buildDashboard(selectedMonth) {
   const months = getAvailableMonths();
-  const month = selectedMonth && isValidMonth(selectedMonth)
+  const fallbackMonth = selectedMonth && isValidMonth(selectedMonth)
     ? selectedMonth
-    : months[months.length - 1];
+    : months[months.length - 1] || null;
+  const month = fallbackMonth;
 
   const { monthTransactions, income, expenses } = getMonthTotals(month);
 
@@ -94,11 +101,11 @@ function buildDashboard(selectedMonth) {
     };
   });
 
-  const monthIndex = months.indexOf(month);
+  const monthIndex = month ? months.indexOf(month) : -1;
   const previousMonth = monthIndex > 0 ? months[monthIndex - 1] : null;
   const previousMonthExpenses = previousMonth ? getMonthTotals(previousMonth).expenses : 0;
 
-  const trailingMonths = months.slice(Math.max(monthIndex - 2, 0), monthIndex + 1);
+  const trailingMonths = monthIndex >= 0 ? months.slice(Math.max(monthIndex - 2, 0), monthIndex + 1) : [];
   const trailingExpenses = trailingMonths.map((monthItem) => getMonthTotals(monthItem).expenses);
   const projectedNextMonthExpenses = trailingExpenses.length
     ? Number((trailingExpenses.reduce((sum, item) => sum + item, 0) / trailingExpenses.length).toFixed(2))
@@ -189,6 +196,22 @@ app.get('/api/transactions', (req, res) => {
 
   const ordered = [...filtered].sort((a, b) => new Date(b.date) - new Date(a.date));
   res.json({ transactions: ordered });
+});
+
+app.delete('/api/transactions', (_req, res) => {
+  transactions = [];
+  res.json({
+    message: 'Dados de exemplo removidos. Agora você pode cadastrar somente os seus valores reais.',
+    transactionsCount: transactions.length
+  });
+});
+
+app.post('/api/transactions/seed', (_req, res) => {
+  transactions = cloneSampleTransactions();
+  res.json({
+    message: 'Dados de exemplo restaurados com sucesso.',
+    transactionsCount: transactions.length
+  });
 });
 
 app.post('/api/transactions', (req, res) => {
