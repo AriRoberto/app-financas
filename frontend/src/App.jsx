@@ -55,6 +55,7 @@ function App() {
   const [fromDate, setFromDate] = useState(getPresetRange('month').from);
   const [toDate, setToDate] = useState(getPresetRange('month').to);
   const [reportData, setReportData] = useState([]);
+  const [selectedCategory, setSelectedCategory] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -142,6 +143,16 @@ function App() {
     if (!loading) loadData(selectedMonth).catch((err) => setError(err.message));
   }, [selectedMember, selectedTerm, fromDate, toDate]);
 
+  useEffect(() => {
+    if (!reportData.length) {
+      setSelectedCategory('');
+      return;
+    }
+
+    const exists = reportData.some((item) => item.category === selectedCategory);
+    if (!exists) setSelectedCategory(reportData[0].category);
+  }, [reportData, selectedCategory]);
+
   async function submitTransaction(event) {
     event.preventDefault();
     setSaving(true);
@@ -173,6 +184,19 @@ function App() {
     }
   }
 
+  async function handleRestoreDemoData() {
+    setError('');
+    try {
+      const response = await fetch(`${API_URL}/api/transactions/seed`, { method: 'POST' });
+      if (!response.ok) {
+        throw new Error('Não foi possível restaurar os dados de exemplo.');
+      }
+      await loadData(selectedMonth);
+    } catch (err) {
+      setError(err.message || 'Erro ao restaurar os dados de exemplo.');
+    }
+  }
+
   function changePreset(nextPreset) {
     setPeriodPreset(nextPreset);
     const range = getPresetRange(nextPreset);
@@ -180,19 +204,21 @@ function App() {
     setToDate(range.to);
   }
 
+  const selectedCategoryData = useMemo(
+    () => reportData.find((item) => item.category === selectedCategory) || null,
+    [reportData, selectedCategory]
+  );
+
   const pieStyle = useMemo(() => {
-    if (!reportData.length) return { background: '#e2e8f0' };
-    const colors = ['#2563eb', '#7c3aed', '#16a34a', '#d97706', '#dc2626', '#0891b2', '#4f46e5'];
-    let start = 0;
-    const slices = reportData.map((item, index) => {
-      const end = start + item.percentage;
-      const color = colors[index % colors.length];
-      const chunk = `${color} ${start}% ${end}%`;
-      start = end;
-      return chunk;
-    }).join(', ');
-    return { background: `conic-gradient(${slices})` };
-  }, [reportData]);
+    if (!selectedCategoryData) return { background: '#e2e8f0' };
+
+    const selectedPercent = selectedCategoryData.percentage;
+    const otherPercent = Math.max(0, 100 - selectedPercent);
+
+    return {
+      background: `conic-gradient(#2563eb 0% ${selectedPercent}%, #cbd5e1 ${selectedPercent}% ${selectedPercent + otherPercent}%)`
+    };
+  }, [selectedCategoryData]);
 
   if (loading) return <main className="page"><p>Carregando...</p></main>;
 
@@ -309,18 +335,43 @@ function App() {
               <input type="checkbox" checked={form.isInvestmentReserve} onChange={(e) => setForm((old) => ({ ...old, isInvestmentReserve: e.target.checked }))} />
               Reserva para investir
             </label>
-            <button disabled={saving} type="submit">{saving ? 'Salvando...' : 'Salvar'}</button>
+            <div className="form-actions">
+              <button disabled={saving} type="submit">{saving ? 'Salvando...' : 'Salvar'}</button>
+              <button type="button" className="ghost" onClick={handleRestoreDemoData}>Restaurar dados de exemplo</button>
+            </div>
           </form>
         </article>
 
         <article className="panel">
-          <h2>Saídas por categoria (pizza)</h2>
-          <div className="pie" style={pieStyle} />
-          <ul className="category-list">
-            {reportData.map((item) => (
-              <li key={item.category}>{item.category}: {currency.format(item.total)} ({item.percentage}%)</li>
-            ))}
-          </ul>
+          <h2>Quadro de categorias + gráfico por categoria</h2>
+          <p className="panel-help">Clique em uma categoria de despesa para ver o gráfico de pizza ao lado.</p>
+          <div className="category-insights">
+            <ul className="category-list clickable">
+              {reportData.map((item) => (
+                <li key={item.category}>
+                  <button
+                    type="button"
+                    className={selectedCategory === item.category ? 'category-btn active' : 'category-btn'}
+                    onClick={() => setSelectedCategory(item.category)}
+                  >
+                    <span>{item.category}</span>
+                    <strong>{currency.format(item.total)} ({item.percentage}%)</strong>
+                  </button>
+                </li>
+              ))}
+            </ul>
+
+            <div className="selected-category-chart">
+              <div className="pie" style={pieStyle} />
+              {selectedCategoryData ? (
+                <p>
+                  <strong>{selectedCategoryData.category}</strong> representa {selectedCategoryData.percentage}% das despesas no período.
+                </p>
+              ) : (
+                <p>Sem dados para o período selecionado.</p>
+              )}
+            </div>
+          </div>
         </article>
       </section>
 

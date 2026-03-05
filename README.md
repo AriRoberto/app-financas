@@ -10,7 +10,7 @@ Projeto full-stack para controlar receitas e despesas familiares com foco em:
 - Cadastro de lançamentos com: membro, tipo, categoria, descrição (modelo + digitação livre), valor, mês, data e vencimento.
 - Filtro global por membro (`husband|wife|family|all`), período e prazo (`short|medium|long`).
 - Dashboard com receita total, despesas, investimento espelhado, totais por membro e histórico mensal.
-- Relatório de saídas por categoria + gráfico de pizza.
+- Relatório de saídas por categoria + gráfico de pizza por categoria selecionada (clique na categoria para atualizar o gráfico).
 - Regra de prazo para despesas:
   - `short`: até 31/12 do ano corrente
   - `medium`: até 24 meses
@@ -38,3 +38,5 @@ Foram adicionadas migrações SQL em `backend/migrations`:
 
 ## Como rodar
 Veja `docs/COMO_RODAR_LOCAL.md`.
+
+> Dica: se você apagou lançamentos sem querer, use o botão **Restaurar dados de exemplo** na tela.

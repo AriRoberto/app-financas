@@ -32,6 +32,8 @@ Abra: `http://localhost:5173`
 4. Para reserva para investir:
    - marque o checkbox **Reserva para investir** ou use categoria `Reserva para investir`;
    - a saída conta em despesas e também aparece em `/api/investments`.
+5. No quadro de categorias, clique em uma despesa para abrir o gráfico de pizza da categoria ao lado.
+6. Se necessário, clique em **Restaurar dados de exemplo** no formulário para repor os dados de demonstração.
 
 ## Testes backend
 ```bash
