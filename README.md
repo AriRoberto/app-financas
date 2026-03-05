@@ -1,35 +1,40 @@
 # App de Finanças Pessoal e Familiar
 
-Projeto full-stack para controlar receitas, despesas e investimentos da família com foco em:
-- cadastro de lançamentos por categoria;
-- comparação entre meses;
-- projeção de saídas futuras.
+Projeto full-stack para controlar receitas e despesas familiares com foco em:
+- multi-membro (`marido`, `esposa`, `familia` + filtro `all`);
+- projeções de saídas;
+- relatórios por categoria e prazo;
+- reserva para investir com espelhamento automático em investimentos.
 
 ## Funcionalidades atuais
-- **Tela de cadastro de lançamentos** com:
-  - membro (você/esposa),
-  - tipo (despesa/investimento/receita),
-  - categoria,
-  - mês de competência (inclusive meses anteriores),
-  - descrição, valor e data opcional.
-- **Dashboard por mês selecionado** com cards de receitas, despesas, saldo e variação versus mês anterior.
-- **Histórico mensal** para comparação direta dos meses já cadastrados.
-- **Projeção de saídas (despesas + investimentos)** do próximo mês com base na média dos últimos meses.
-- **Modelos de descrição por tipo/categoria** com opção de digitar livremente.
-- **Receita total familiar e receita individual** por membro.
-- **Botão para zerar dados de exemplo** e iniciar do zero com valores reais.
+- Cadastro de lançamentos com: membro, tipo, categoria, descrição (modelo + digitação livre), valor, mês, data e vencimento.
+- Filtro global por membro (`husband|wife|family|all`), período e prazo (`short|medium|long`).
+- Dashboard com receita total, despesas, investimento espelhado, totais por membro e histórico mensal.
+- Relatório de saídas por categoria + gráfico de pizza.
+- Regra de prazo para despesas:
+  - `short`: até 31/12 do ano corrente
+  - `medium`: até 24 meses
+  - `long`: acima de 24 meses
+- Regra de **reserva para investir**:
+  - continua como despesa no fluxo de caixa;
+  - cria/atualiza investimento espelhado em `/api/investments`.
 
 ## Endpoints principais
-- `GET /api/dashboard?month=YYYY-MM`
-- `GET /api/suggestions?month=YYYY-MM`
-- `GET /api/transactions?month=YYYY-MM`
+- `GET /api/dashboard?member=&month=&from=&to=&term=`
+- `GET /api/transactions?member=&month=&from=&to=&term=`
 - `POST /api/transactions`
-- `GET /api/family-members`
+- `PATCH /api/transactions/:id`
+- `DELETE /api/transactions/:id`
+- `GET /reports/expenses-by-category?member=&from=&to=`
+- `GET /api/investments?member=&from=&to=`
+- `GET /api/members`
 - `GET /api/categories`
-- `GET /api/description-templates?type=expense|investment|income&category=...`
-- `GET /api/months`
-- `DELETE /api/transactions` (zera todos os lançamentos, incluindo dados de modelo)
-- `POST /api/transactions/seed` (restaura os dados de modelo)
+- `GET /api/description-templates?type=&category=`
+
+## Banco e migrações
+Foram adicionadas migrações SQL em `backend/migrations`:
+- `001_members_and_transactions.sql`
+- `002_investments.sql`
 
 ## Como rodar
-Siga `docs/COMO_RODAR_LOCAL.md`.
+Veja `docs/COMO_RODAR_LOCAL.md`.

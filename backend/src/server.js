@@ -7,9 +7,10 @@ const PORT = process.env.PORT || 3333;
 app.use(cors());
 app.use(express.json());
 
-const familyMembers = [
-  { id: 'you', name: 'Você' },
-  { id: 'wife', name: 'Esposa' }
+const members = [
+  { id: 'husband', name: 'marido', createdAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'wife', name: 'esposa', createdAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'family', name: 'familia', createdAt: '2026-01-01T00:00:00.000Z' }
 ];
 
 const expenseCategories = [
@@ -20,18 +21,12 @@ const expenseCategories = [
   'Educação',
   'Lazer',
   'Assinaturas',
+  'Reserva para investir',
   'Outros'
 ];
 
-const investmentCategories = [
-  'Reserva de emergência',
-  'Renda fixa',
-  'Fundos',
-  'Ações',
-  'Previdência',
-  'Cripto',
-  'Outros investimentos'
-];
+const incomeCategories = ['Salário', 'Renda extra', 'Freelance', 'Bônus'];
+const investmentCategories = ['Reserva de emergência', 'Renda fixa', 'Fundos', 'Ações', 'Previdência', 'Cripto', 'Outros investimentos'];
 
 const descriptionTemplatesByCategory = {
   Moradia: ['Aluguel', 'Condomínio', 'Conta de luz', 'Conta de água'],
@@ -41,6 +36,7 @@ const descriptionTemplatesByCategory = {
   Educação: ['Escola', 'Curso', 'Material escolar'],
   Lazer: ['Passeio família', 'Cinema', 'Restaurante'],
   Assinaturas: ['Streaming', 'Aplicativo', 'Internet'],
+  'Reserva para investir': ['Aporte separado para investimento'],
   'Reserva de emergência': ['Aporte na reserva', 'Transferência para reserva'],
   'Renda fixa': ['Tesouro Selic', 'CDB', 'LCI/LCA'],
   Fundos: ['Fundo multimercado', 'Fundo imobiliário'],
@@ -51,154 +47,175 @@ const descriptionTemplatesByCategory = {
 };
 
 const sampleTransactions = [
-  { id: 't1', memberId: 'you', type: 'income', category: 'Salário', description: 'Salário mensal', amount: 8500, month: '2025-12', date: '2025-12-05' },
-  { id: 't2', memberId: 'wife', type: 'income', category: 'Salário', description: 'Salário mensal', amount: 4000, month: '2025-12', date: '2025-12-05' },
-  { id: 't3', memberId: 'you', type: 'expense', category: 'Moradia', description: 'Aluguel', amount: 2500, month: '2025-12', date: '2025-12-06' },
-  { id: 't4', memberId: 'wife', type: 'expense', category: 'Alimentação', description: 'Supermercado', amount: 1300, month: '2025-12', date: '2025-12-07' },
-  { id: 't5', memberId: 'you', type: 'investment', category: 'Renda fixa', description: 'Tesouro Selic', amount: 600, month: '2025-12', date: '2025-12-10' },
-
-  { id: 't6', memberId: 'you', type: 'income', category: 'Salário', description: 'Salário mensal', amount: 8500, month: '2026-01', date: '2026-01-05' },
-  { id: 't7', memberId: 'wife', type: 'income', category: 'Salário', description: 'Salário mensal', amount: 4000, month: '2026-01', date: '2026-01-05' },
-  { id: 't8', memberId: 'you', type: 'expense', category: 'Moradia', description: 'Aluguel', amount: 2600, month: '2026-01', date: '2026-01-06' },
-  { id: 't9', memberId: 'wife', type: 'expense', category: 'Alimentação', description: 'Supermercado', amount: 1450, month: '2026-01', date: '2026-01-07' },
-  { id: 't10', memberId: 'wife', type: 'investment', category: 'Previdência', description: 'Aporte previdência privada', amount: 800, month: '2026-01', date: '2026-01-15' },
-
-  { id: 't11', memberId: 'you', type: 'income', category: 'Salário', description: 'Salário mensal', amount: 8500, month: '2026-02', date: '2026-02-05' },
-  { id: 't12', memberId: 'wife', type: 'income', category: 'Salário', description: 'Salário mensal', amount: 4000, month: '2026-02', date: '2026-02-05' },
-  { id: 't13', memberId: 'you', type: 'expense', category: 'Moradia', description: 'Aluguel', amount: 2600, month: '2026-02', date: '2026-02-06' },
-  { id: 't14', memberId: 'wife', type: 'expense', category: 'Alimentação', description: 'Supermercado', amount: 1500, month: '2026-02', date: '2026-02-07' },
-  { id: 't15', memberId: 'you', type: 'expense', category: 'Transporte', description: 'Combustível', amount: 620, month: '2026-02', date: '2026-02-08' },
-  { id: 't16', memberId: 'wife', type: 'expense', category: 'Educação', description: 'Curso do filho', amount: 1450, month: '2026-02', date: '2026-02-10' },
-  { id: 't17', memberId: 'you', type: 'investment', category: 'Renda fixa', description: 'CDB', amount: 1000, month: '2026-02', date: '2026-02-11' },
-  { id: 't18', memberId: 'wife', type: 'investment', category: 'Reserva de emergência', description: 'Aporte na reserva', amount: 900, month: '2026-02', date: '2026-02-13' }
+  { id: 't1', memberId: 'husband', type: 'income', category: 'Salário', description: 'Salário mensal', amount: 9200, month: '2026-01', date: '2026-01-05' },
+  { id: 't2', memberId: 'wife', type: 'income', category: 'Salário', description: 'Salário mensal', amount: 5400, month: '2026-01', date: '2026-01-05' },
+  { id: 't3', memberId: 'family', type: 'expense', category: 'Moradia', description: 'Aluguel', amount: 3100, month: '2026-01', date: '2026-01-06', dueDate: '2026-01-06' },
+  { id: 't4', memberId: 'wife', type: 'expense', category: 'Alimentação', description: 'Supermercado', amount: 1500, month: '2026-01', date: '2026-01-08', dueDate: '2026-01-08' },
+  { id: 't5', memberId: 'husband', type: 'expense', category: 'Reserva para investir', description: 'Reserva mensal', amount: 800, month: '2026-01', date: '2026-01-15', dueDate: '2027-06-01', isInvestmentReserve: true },
+  { id: 't6', memberId: 'family', type: 'income', category: 'Renda extra', description: 'Venda ocasional', amount: 900, month: '2026-02', date: '2026-02-03' },
+  { id: 't7', memberId: 'husband', type: 'expense', category: 'Transporte', description: 'Combustível', amount: 620, month: '2026-02', date: '2026-02-09', dueDate: '2026-02-09' },
+  { id: 't8', memberId: 'wife', type: 'expense', category: 'Saúde', description: 'Farmácia', amount: 320, month: '2026-02', date: '2026-02-10', dueDate: '2028-05-10' },
+  { id: 't9', memberId: 'family', type: 'expense', category: 'Educação', description: 'Curso da família', amount: 900, month: '2026-03', date: '2026-03-11', dueDate: '2026-11-30' }
 ];
 
+function normalizeMemberId(value) {
+  if (!value) return 'family';
+  if (value === 'you') return 'husband';
+  if (value === 'marido') return 'husband';
+  if (value === 'wife' || value === 'esposa') return 'wife';
+  if (value === 'familia' || value === 'family') return 'family';
+  if (value === 'all') return 'all';
+  return value;
+}
+
 function cloneSampleTransactions() {
-  return sampleTransactions.map((item) => ({ ...item }));
+  return sampleTransactions.map((item) => ({
+    ...item,
+    memberId: normalizeMemberId(item.memberId),
+    term: item.type === 'expense' ? classifyTerm(item.dueDate || item.date) : null
+  }));
 }
 
 let transactions = cloneSampleTransactions();
+let investments = [];
+
+function endOfCurrentYear() {
+  const now = new Date();
+  return new Date(Date.UTC(now.getUTCFullYear(), 11, 31, 23, 59, 59));
+}
+
+function addMonths(dateInput, months) {
+  const date = new Date(dateInput);
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + months, date.getUTCDate(), 23, 59, 59));
+}
+
+export function classifyTerm(dueDate) {
+  if (!dueDate) return 'short';
+  const target = new Date(`${dueDate}T00:00:00Z`);
+  if (target <= endOfCurrentYear()) return 'short';
+  if (target <= addMonths(new Date(), 24)) return 'medium';
+  return 'long';
+}
+
+function seedInvestmentsFromTransactions() {
+  const mirrored = transactions
+    .filter((item) => item.type === 'expense' && item.isInvestmentReserve)
+    .map((item) => ({
+      id: `inv-${item.id}`,
+      memberId: item.memberId,
+      date: item.date,
+      amount: item.amount,
+      type: 'reserve',
+      sourceTransactionId: item.id,
+      createdAt: new Date().toISOString()
+    }));
+  investments = mirrored;
+}
+
+seedInvestmentsFromTransactions();
 
 function isValidMonth(value) {
   return /^\d{4}-(0[1-9]|1[0-2])$/.test(value);
 }
 
-function getAvailableMonths() {
-  return [...new Set(transactions.map((item) => item.month))].sort();
+function getMonthFromDate(date) {
+  return date.slice(0, 7);
 }
 
-function getCategoryTemplates(type, category) {
-  if (category && descriptionTemplatesByCategory[category]) {
-    return descriptionTemplatesByCategory[category];
-  }
-
-  if (type === 'investment') {
-    return investmentCategories.flatMap((item) => descriptionTemplatesByCategory[item] || []);
-  }
-
-  if (type === 'expense') {
-    return expenseCategories.flatMap((item) => descriptionTemplatesByCategory[item] || []);
-  }
-
-  return ['Salário mensal', 'Renda extra', 'Freelance', 'Bônus'];
+function getAvailableMonths(filteredTransactions = transactions) {
+  return [...new Set(filteredTransactions.map((item) => item.month))].sort();
 }
 
-function getMonthTotals(month) {
-  const monthTransactions = transactions.filter((item) => item.month === month);
-  const income = monthTransactions.filter((item) => item.type === 'income').reduce((sum, item) => sum + item.amount, 0);
-  const expenses = monthTransactions.filter((item) => item.type === 'expense').reduce((sum, item) => sum + item.amount, 0);
-  const investments = monthTransactions.filter((item) => item.type === 'investment').reduce((sum, item) => sum + item.amount, 0);
-
-  return {
-    monthTransactions,
-    income,
-    expenses,
-    investments,
-    outflow: expenses + investments
-  };
+function isMemberMatch(transaction, member) {
+  const safe = normalizeMemberId(member || 'all');
+  if (safe === 'all') return true;
+  return normalizeMemberId(transaction.memberId) === safe;
 }
 
-function buildDashboard(selectedMonth) {
-  const months = getAvailableMonths();
-  const month = selectedMonth && isValidMonth(selectedMonth)
-    ? selectedMonth
-    : months[months.length - 1] || null;
+function inPeriod(transaction, from, to) {
+  if (!from && !to) return true;
+  const txDate = new Date(`${transaction.date}T00:00:00Z`);
+  const fromDate = from ? new Date(`${from}T00:00:00Z`) : null;
+  const toDate = to ? new Date(`${to}T00:00:00Z`) : null;
+  if (fromDate && txDate < fromDate) return false;
+  if (toDate && txDate > toDate) return false;
+  return true;
+}
 
-  const { monthTransactions, income, expenses, investments, outflow } = getMonthTotals(month);
+function filterTransactions({ month, member = 'all', from, to, term }) {
+  return transactions.filter((item) => {
+    if (month && isValidMonth(month) && item.month !== month) return false;
+    if (!isMemberMatch(item, member)) return false;
+    if (!inPeriod(item, from, to)) return false;
+    if (term && term !== 'all' && item.type === 'expense' && item.term !== term) return false;
+    return true;
+  });
+}
 
-  const expenseCategoriesMap = monthTransactions
-    .filter((item) => item.type !== 'income')
+function calculateSummary(filteredTransactions) {
+  const income = filteredTransactions.filter((item) => item.type === 'income').reduce((sum, item) => sum + item.amount, 0);
+  const expenses = filteredTransactions.filter((item) => item.type === 'expense').reduce((sum, item) => sum + item.amount, 0);
+  const investmentsFromReserves = filteredTransactions.filter((item) => item.type === 'expense' && item.isInvestmentReserve).reduce((sum, item) => sum + item.amount, 0);
+  const investmentsDirect = investments
+    .filter((item) => isMemberMatch(item, 'all') && filteredTransactions.find((tx) => tx.id === item.sourceTransactionId))
+    .reduce((sum, item) => sum + item.amount, 0);
+  const investmentsTotal = Math.max(investmentsFromReserves, investmentsDirect);
+  const outflow = expenses;
+  return { income, expenses, investmentsTotal, outflow, balance: income - outflow };
+}
+
+function buildDashboard({ month, member = 'all', from, to, term = 'all' }) {
+  const filteredTransactions = filterTransactions({ month, member, from, to, term });
+  const months = getAvailableMonths(filteredTransactions);
+  const summary = calculateSummary(filteredTransactions);
+
+  const categoryTotals = filteredTransactions
+    .filter((item) => item.type === 'expense')
     .reduce((acc, item) => {
-      const key = item.type === 'investment' ? `${item.category} (Investimento)` : item.category;
-      acc[key] = (acc[key] || 0) + item.amount;
+      acc[item.category] = (acc[item.category] || 0) + item.amount;
       return acc;
     }, {});
 
-  const categories = Object.entries(expenseCategoriesMap)
-    .map(([name, amount]) => ({ name, amount }))
-    .sort((a, b) => b.amount - a.amount);
+  const categories = Object.entries(categoryTotals).map(([name, amount]) => ({ name, amount })).sort((a, b) => b.amount - a.amount);
 
-  const byMember = familyMembers.map((member) => {
-    const memberTransactions = monthTransactions.filter((item) => item.memberId === member.id);
-    const memberIncome = memberTransactions.filter((item) => item.type === 'income').reduce((sum, item) => sum + item.amount, 0);
-    const memberExpenses = memberTransactions.filter((item) => item.type === 'expense').reduce((sum, item) => sum + item.amount, 0);
-    const memberInvestments = memberTransactions.filter((item) => item.type === 'investment').reduce((sum, item) => sum + item.amount, 0);
-
-    return {
-      memberId: member.id,
-      memberName: member.name,
-      income: memberIncome,
-      expenses: memberExpenses,
-      investments: memberInvestments,
-      balance: memberIncome - memberExpenses - memberInvestments
-    };
+  const byMember = members.map((memberItem) => {
+    const data = filteredTransactions.filter((item) => item.memberId === memberItem.id);
+    const income = data.filter((item) => item.type === 'income').reduce((sum, item) => sum + item.amount, 0);
+    const expenses = data.filter((item) => item.type === 'expense').reduce((sum, item) => sum + item.amount, 0);
+    const investments = data.filter((item) => item.type === 'expense' && item.isInvestmentReserve).reduce((sum, item) => sum + item.amount, 0);
+    return { memberId: memberItem.id, memberName: memberItem.name, income, expenses, investments, balance: income - expenses };
   });
 
-  const monthIndex = month ? months.indexOf(month) : -1;
-  const previousMonth = monthIndex > 0 ? months[monthIndex - 1] : null;
-  const previousTotals = previousMonth ? getMonthTotals(previousMonth) : null;
-  const previousMonthOutflow = previousTotals ? previousTotals.outflow : 0;
+  const termTotals = ['short', 'medium', 'long'].map((name) => ({
+    term: name,
+    total: filteredTransactions
+      .filter((item) => item.type === 'expense' && item.term === name)
+      .reduce((sum, item) => sum + item.amount, 0)
+  }));
 
-  const trailingMonths = monthIndex >= 0 ? months.slice(Math.max(monthIndex - 2, 0), monthIndex + 1) : [];
-  const trailingOutflows = trailingMonths.map((monthItem) => getMonthTotals(monthItem).outflow);
-  const projectedNextMonthOutflow = trailingOutflows.length
-    ? Number((trailingOutflows.reduce((sum, item) => sum + item, 0) / trailingOutflows.length).toFixed(2))
-    : outflow;
-
-  const monthlyHistory = months.map((monthItem) => {
-    const totals = getMonthTotals(monthItem);
-    return {
-      month: monthItem,
-      income: totals.income,
-      expenses: totals.expenses,
-      investments: totals.investments,
-      outflow: totals.outflow,
-      balance: totals.income - totals.outflow
-    };
+  const monthlyHistory = getAvailableMonths(filteredTransactions).map((monthItem) => {
+    const data = filteredTransactions.filter((item) => item.month === monthItem);
+    const income = data.filter((item) => item.type === 'income').reduce((sum, item) => sum + item.amount, 0);
+    const expenses = data.filter((item) => item.type === 'expense').reduce((sum, item) => sum + item.amount, 0);
+    return { month: monthItem, income, expenses, balance: income - expenses };
   });
-
-  const balance = income - outflow;
-  const savingsRate = income > 0 ? Number(((balance / income) * 100).toFixed(2)) : 0;
 
   return {
-    month,
-    income,
-    expenses,
-    investments,
-    outflow,
-    balance,
-    savingsRate,
+    filters: { month, member: normalizeMemberId(member), from, to, term },
+    income: summary.income,
+    expenses: summary.expenses,
+    investments: summary.investmentsTotal,
+    outflow: summary.outflow,
+    balance: summary.balance,
     categories,
     byMember,
     availableMonths: months,
-    comparison: {
-      previousMonth,
-      previousMonthOutflow,
-      differenceFromPrevious: Number((outflow - previousMonthOutflow).toFixed(2))
-    },
+    termTotals,
     projection: {
-      basedOnMonths: trailingMonths,
-      projectedNextMonthOutflow
+      basedOnMonths: months.slice(-3),
+      projectedNextMonthOutflow: months.length
+        ? Number((monthlyHistory.slice(-3).reduce((sum, item) => sum + item.expenses, 0) / Math.min(monthlyHistory.length, 3)).toFixed(2))
+        : 0
     },
     monthlyHistory
   };
@@ -206,142 +223,238 @@ function buildDashboard(selectedMonth) {
 
 function buildSuggestions(dashboard) {
   const topCategory = dashboard.categories[0];
-  const topPercent = topCategory && dashboard.outflow > 0
-    ? Math.round((topCategory.amount / dashboard.outflow) * 100)
-    : 0;
-
-  const previous = dashboard.comparison.previousMonthOutflow;
-  const diff = dashboard.comparison.differenceFromPrevious;
-  const trendText = previous > 0
-    ? diff > 0
-      ? `As saídas totais (despesas + investimentos) subiram ${Math.abs(diff).toFixed(2)} em relação ao mês anterior.`
-      : `As saídas totais caíram ${Math.abs(diff).toFixed(2)} em relação ao mês anterior.`
-    : 'Cadastre mais meses para comparação automática.';
-
   return {
     suggestions: [
-      topCategory
-        ? `Maior peso de saída está em ${topCategory.name} (${topPercent}% do total). Defina um limite mensal para essa categoria.`
-        : 'Cadastre despesas e investimentos para receber sugestões por categoria.',
-      trendText,
-      `Projeção do próximo mês: ${dashboard.projection.projectedNextMonthOutflow.toFixed(2)} em saídas, com base em ${dashboard.projection.basedOnMonths.join(', ')}.`
+      topCategory ? `Maior categoria de saída: ${topCategory.name}.` : 'Cadastre despesas para gerar sugestões.',
+      `Saldo atual filtrado: ${dashboard.balance.toFixed(2)}.`
     ]
   };
+}
+
+function getCategoryTemplates(type, category) {
+  if (category && descriptionTemplatesByCategory[category]) return descriptionTemplatesByCategory[category];
+  if (type === 'expense') return expenseCategories.flatMap((item) => descriptionTemplatesByCategory[item] || []);
+  if (type === 'income') return ['Salário mensal', 'Renda extra', 'Freelance', 'Bônus'];
+  return ['Aporte em investimento'];
+}
+
+function validateMember(memberId) {
+  return members.some((item) => item.id === normalizeMemberId(memberId));
+}
+
+function upsertInvestmentFromReserve(transaction) {
+  if (!(transaction.type === 'expense' && transaction.isInvestmentReserve)) {
+    investments = investments.filter((item) => item.sourceTransactionId !== transaction.id);
+    return;
+  }
+
+  const existing = investments.find((item) => item.sourceTransactionId === transaction.id);
+  const next = {
+    id: existing?.id || `inv-${transaction.id}`,
+    memberId: transaction.memberId,
+    date: transaction.date,
+    amount: transaction.amount,
+    sourceTransactionId: transaction.id,
+    type: 'reserve',
+    createdAt: existing?.createdAt || new Date().toISOString()
+  };
+
+  if (existing) {
+    investments = investments.map((item) => (item.sourceTransactionId === transaction.id ? next : item));
+  } else {
+    investments = [next, ...investments];
+  }
 }
 
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, service: 'backend', timestamp: new Date().toISOString() });
 });
 
+app.get('/api/members', (_req, res) => {
+  res.json({ members });
+});
+
 app.get('/api/family-members', (_req, res) => {
-  res.json({ members: familyMembers });
+  res.json({ members });
 });
 
 app.get('/api/categories', (_req, res) => {
-  res.json({
-    categories: expenseCategories,
-    expenseCategories,
-    investmentCategories
-  });
+  res.json({ categories: expenseCategories, expenseCategories, incomeCategories, investmentCategories });
 });
 
 app.get('/api/description-templates', (req, res) => {
-  const type = req.query.type;
-  const category = req.query.category;
-
-  res.json({ templates: getCategoryTemplates(type, category) });
+  res.json({ templates: getCategoryTemplates(req.query.type, req.query.category) });
 });
 
-app.get('/api/months', (_req, res) => {
-  res.json({ months: getAvailableMonths() });
+app.get('/api/months', (req, res) => {
+  const filtered = filterTransactions({ member: req.query.member || 'all' });
+  res.json({ months: getAvailableMonths(filtered) });
 });
 
 app.get('/api/transactions', (req, res) => {
-  const month = req.query.month;
-
-  const filtered = month && isValidMonth(month)
-    ? transactions.filter((item) => item.month === month)
-    : transactions;
-
+  const filtered = filterTransactions({
+    month: req.query.month,
+    member: req.query.member || 'all',
+    from: req.query.from,
+    to: req.query.to,
+    term: req.query.term || 'all'
+  });
   const ordered = [...filtered].sort((a, b) => new Date(b.date) - new Date(a.date));
   res.json({ transactions: ordered });
 });
 
 app.delete('/api/transactions', (_req, res) => {
   transactions = [];
-  res.json({
-    message: 'Dados de exemplo removidos. Agora você pode cadastrar somente os seus valores reais.',
-    transactionsCount: transactions.length
-  });
+  investments = [];
+  res.json({ message: 'Todos os lançamentos removidos.', transactionsCount: 0 });
 });
 
 app.post('/api/transactions/seed', (_req, res) => {
   transactions = cloneSampleTransactions();
-  res.json({
-    message: 'Dados de exemplo restaurados com sucesso.',
-    transactionsCount: transactions.length
-  });
+  seedInvestmentsFromTransactions();
+  res.json({ message: 'Dados de exemplo restaurados.', transactionsCount: transactions.length });
 });
 
 app.post('/api/transactions', (req, res) => {
-  const { memberId, type, category, description, amount, month, date } = req.body;
-
-  if (!memberId || !type || !category || !description || !amount || !month) {
-    return res.status(400).json({ message: 'Preencha membro, tipo, categoria, descrição, valor e mês.' });
-  }
-
-  if (!isValidMonth(month)) {
-    return res.status(400).json({ message: 'Mês inválido. Use o formato YYYY-MM.' });
-  }
-
-  if (!familyMembers.find((member) => member.id === memberId)) {
-    return res.status(400).json({ message: 'Membro da família inválido.' });
-  }
-
-  if (!['income', 'expense', 'investment'].includes(type)) {
-    return res.status(400).json({ message: 'Tipo inválido. Use income, expense ou investment.' });
-  }
-
-  if (type === 'expense' && !expenseCategories.includes(category)) {
-    return res.status(400).json({ message: 'Categoria de despesa inválida.' });
-  }
-
-  if (type === 'investment' && !investmentCategories.includes(category)) {
-    return res.status(400).json({ message: 'Categoria de investimento inválida.' });
-  }
-
-  const parsedAmount = Number(amount);
-
-  if (Number.isNaN(parsedAmount) || parsedAmount <= 0) {
-    return res.status(400).json({ message: 'Valor inválido. Informe um número maior que zero.' });
-  }
-
-  const safeDate = date || `${month}-01`;
-
-  const transaction = {
-    id: `t${Date.now()}`,
+  const {
     memberId,
     type,
     category,
     description,
-    amount: parsedAmount,
+    amount,
     month,
-    date: safeDate
+    date,
+    dueDate,
+    isInvestmentReserve
+  } = req.body;
+
+  const normalizedMemberId = normalizeMemberId(memberId);
+
+  if (!normalizedMemberId || !type || !category || !description || !amount || !month) {
+    return res.status(400).json({ message: 'Preencha membro, tipo, categoria, descrição, valor e mês.' });
+  }
+
+  if (!validateMember(normalizedMemberId)) {
+    return res.status(400).json({ message: 'Membro inválido.' });
+  }
+
+  if (!['income', 'expense'].includes(type)) {
+    return res.status(400).json({ message: 'Tipo inválido. Use income ou expense.' });
+  }
+
+  const parsedAmount = Number(amount);
+  if (Number.isNaN(parsedAmount) || parsedAmount <= 0) {
+    return res.status(400).json({ message: 'Valor inválido.' });
+  }
+
+  const safeDate = date || `${month}-01`;
+  const safeDueDate = dueDate || safeDate;
+
+  const transaction = {
+    id: `t${Date.now()}`,
+    memberId: normalizedMemberId,
+    type,
+    category,
+    description,
+    amount: parsedAmount,
+    month: isValidMonth(month) ? month : getMonthFromDate(safeDate),
+    date: safeDate,
+    dueDate: safeDueDate,
+    term: type === 'expense' ? classifyTerm(safeDueDate) : null,
+    isInvestmentReserve: Boolean(isInvestmentReserve || category === 'Reserva para investir')
   };
 
   transactions = [transaction, ...transactions];
-  return res.status(201).json({ transaction });
+  upsertInvestmentFromReserve(transaction);
+  res.status(201).json({ transaction });
+});
+
+app.patch('/api/transactions/:id', (req, res) => {
+  const target = transactions.find((item) => item.id === req.params.id);
+  if (!target) return res.status(404).json({ message: 'Lançamento não encontrado.' });
+
+  const next = {
+    ...target,
+    ...req.body,
+    memberId: normalizeMemberId(req.body.memberId || target.memberId)
+  };
+
+  next.term = next.type === 'expense' ? classifyTerm(next.dueDate || next.date) : null;
+  next.isInvestmentReserve = Boolean(next.isInvestmentReserve || next.category === 'Reserva para investir');
+
+  transactions = transactions.map((item) => (item.id === target.id ? next : item));
+  upsertInvestmentFromReserve(next);
+  return res.json({ transaction: next });
+});
+
+app.delete('/api/transactions/:id', (req, res) => {
+  const exists = transactions.some((item) => item.id === req.params.id);
+  if (!exists) return res.status(404).json({ message: 'Lançamento não encontrado.' });
+  transactions = transactions.filter((item) => item.id !== req.params.id);
+  investments = investments.filter((item) => item.sourceTransactionId !== req.params.id);
+  return res.status(204).send();
 });
 
 app.get('/api/dashboard', (req, res) => {
-  res.json(buildDashboard(req.query.month));
+  res.json(buildDashboard({
+    month: req.query.month,
+    member: req.query.member || 'all',
+    from: req.query.from,
+    to: req.query.to,
+    term: req.query.term || 'all'
+  }));
 });
 
 app.get('/api/suggestions', (req, res) => {
-  const dashboard = buildDashboard(req.query.month);
+  const dashboard = buildDashboard({
+    month: req.query.month,
+    member: req.query.member || 'all',
+    from: req.query.from,
+    to: req.query.to,
+    term: req.query.term || 'all'
+  });
   res.json(buildSuggestions(dashboard));
 });
 
-app.listen(PORT, () => {
-  console.log(`API running on http://localhost:${PORT}`);
+app.get('/api/investments', (req, res) => {
+  const member = req.query.member || 'all';
+  const from = req.query.from;
+  const to = req.query.to;
+  const filtered = investments.filter((item) => {
+    if (!isMemberMatch(item, member)) return false;
+    return inPeriod({ date: item.date }, from, to);
+  });
+
+  res.json({
+    total: filtered.reduce((sum, item) => sum + item.amount, 0),
+    investments: filtered
+  });
 });
+
+app.get('/reports/expenses-by-category', (req, res) => {
+  const member = req.query.member || 'all';
+  const from = req.query.from;
+  const to = req.query.to;
+
+  const filtered = filterTransactions({ member, from, to }).filter((item) => item.type === 'expense');
+  const totalExpenses = filtered.reduce((sum, item) => sum + item.amount, 0);
+
+  const rows = Object.entries(filtered.reduce((acc, item) => {
+    acc[item.category] = (acc[item.category] || 0) + item.amount;
+    return acc;
+  }, {})).map(([category, total]) => ({
+    category,
+    total,
+    percentage: totalExpenses > 0 ? Number(((total / totalExpenses) * 100).toFixed(2)) : 0
+  })).sort((a, b) => b.total - a.total);
+
+  res.json({ member: normalizeMemberId(member), from, to, totalExpenses, categories: rows });
+});
+
+export { app, buildDashboard, filterTransactions, seedInvestmentsFromTransactions, upsertInvestmentFromReserve };
+
+if (process.env.NODE_ENV !== 'test') {
+  app.listen(PORT, () => {
+    console.log(`API running on http://localhost:${PORT}`);
+  });
+}
