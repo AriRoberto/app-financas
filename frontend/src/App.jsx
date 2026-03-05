@@ -58,6 +58,7 @@ function App() {
   const [selectedCategoryKey, setSelectedCategoryKey] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const [error, setError] = useState('');
 
   const currentCategories = useMemo(() => {
@@ -225,6 +226,27 @@ function App() {
     }
   }
 
+
+  async function handleClearDemoData() {
+    const confirmed = window.confirm('Isso vai limpar todos os dados atuais (inclusive lançamentos reais). Deseja continuar?');
+    if (!confirmed) return;
+
+    setClearing(true);
+    setError('');
+
+    try {
+      const response = await fetch(`${API_URL}/api/transactions`, { method: 'DELETE' });
+      if (!response.ok) {
+        throw new Error('Não foi possível limpar os dados de teste.');
+      }
+      await loadData(selectedMonth);
+    } catch (err) {
+      setError(err.message || 'Erro ao limpar os dados de teste.');
+    } finally {
+      setClearing(false);
+    }
+  }
+
   async function handleRestoreDemoData() {
     setError('');
     try {
@@ -385,7 +407,10 @@ function App() {
             ) : null}
             <div className="form-actions">
               <button disabled={saving} type="submit">{saving ? 'Salvando...' : 'Salvar'}</button>
-              <button type="button" className="ghost" onClick={handleRestoreDemoData}>Restaurar dados de exemplo</button>
+              <button type="button" className="ghost" onClick={handleRestoreDemoData}>Trazer dados de teste</button>
+              <button type="button" className="ghost danger" disabled={clearing} onClick={handleClearDemoData}>
+                {clearing ? 'Limpando...' : 'Limpar dados de teste'}
+              </button>
             </div>
           </form>
         </article>
