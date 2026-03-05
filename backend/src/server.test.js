@@ -74,3 +74,30 @@ test('agregação de categorias soma corretamente', async () => {
     assert.equal(sumCategories, data.totalExpenses);
   });
 });
+
+
+test('tipo investment é aceito e entra no relatório de investimentos', async () => {
+  await withServer(async (baseUrl) => {
+    await fetch(`${baseUrl}/api/transactions/seed`, { method: 'POST' });
+
+    const createResponse = await fetch(`${baseUrl}/api/transactions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        memberId: 'husband',
+        type: 'investment',
+        category: 'Renda fixa',
+        description: 'Aporte extra CDB',
+        amount: 777,
+        month: '2026-04',
+        date: '2026-04-12'
+      })
+    });
+
+    assert.equal(createResponse.status, 201);
+
+    const investmentsResponse = await fetch(`${baseUrl}/api/investments?member=husband`);
+    const investmentsData = await investmentsResponse.json();
+    assert.ok(investmentsData.investments.some((item) => item.amount === 777 && item.type === 'direct'));
+  });
+});

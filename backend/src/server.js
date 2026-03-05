@@ -52,10 +52,26 @@ const sampleTransactions = [
   { id: 't3', memberId: 'family', type: 'expense', category: 'Moradia', description: 'Aluguel', amount: 3100, month: '2026-01', date: '2026-01-06', dueDate: '2026-01-06' },
   { id: 't4', memberId: 'wife', type: 'expense', category: 'Alimentação', description: 'Supermercado', amount: 1500, month: '2026-01', date: '2026-01-08', dueDate: '2026-01-08' },
   { id: 't5', memberId: 'husband', type: 'expense', category: 'Reserva para investir', description: 'Reserva mensal', amount: 800, month: '2026-01', date: '2026-01-15', dueDate: '2027-06-01', isInvestmentReserve: true },
-  { id: 't6', memberId: 'family', type: 'income', category: 'Renda extra', description: 'Venda ocasional', amount: 900, month: '2026-02', date: '2026-02-03' },
-  { id: 't7', memberId: 'husband', type: 'expense', category: 'Transporte', description: 'Combustível', amount: 620, month: '2026-02', date: '2026-02-09', dueDate: '2026-02-09' },
-  { id: 't8', memberId: 'wife', type: 'expense', category: 'Saúde', description: 'Farmácia', amount: 320, month: '2026-02', date: '2026-02-10', dueDate: '2028-05-10' },
-  { id: 't9', memberId: 'family', type: 'expense', category: 'Educação', description: 'Curso da família', amount: 900, month: '2026-03', date: '2026-03-11', dueDate: '2026-11-30' }
+  { id: 't6', memberId: 'husband', type: 'investment', category: 'Renda fixa', description: 'CDB mensal', amount: 650, month: '2026-01', date: '2026-01-20' },
+  { id: 't7', memberId: 'wife', type: 'investment', category: 'Previdência', description: 'Aporte previdência', amount: 420, month: '2026-01', date: '2026-01-22' },
+
+  { id: 't8', memberId: 'husband', type: 'income', category: 'Salário', description: 'Salário mensal', amount: 9200, month: '2026-02', date: '2026-02-05' },
+  { id: 't9', memberId: 'wife', type: 'income', category: 'Salário', description: 'Salário mensal', amount: 5400, month: '2026-02', date: '2026-02-05' },
+  { id: 't10', memberId: 'family', type: 'income', category: 'Renda extra', description: 'Venda ocasional', amount: 900, month: '2026-02', date: '2026-02-03' },
+  { id: 't11', memberId: 'husband', type: 'expense', category: 'Transporte', description: 'Combustível', amount: 620, month: '2026-02', date: '2026-02-09', dueDate: '2026-02-09' },
+  { id: 't12', memberId: 'wife', type: 'expense', category: 'Saúde', description: 'Farmácia', amount: 320, month: '2026-02', date: '2026-02-10', dueDate: '2028-05-10' },
+  { id: 't13', memberId: 'husband', type: 'expense', category: 'Alimentação', description: 'Feira semanal', amount: 460, month: '2026-02', date: '2026-02-11', dueDate: '2026-02-11' },
+  { id: 't14', memberId: 'wife', type: 'expense', category: 'Lazer', description: 'Cinema', amount: 220, month: '2026-02', date: '2026-02-14', dueDate: '2026-02-14' },
+  { id: 't15', memberId: 'husband', type: 'investment', category: 'Ações', description: 'Compra ETF', amount: 500, month: '2026-02', date: '2026-02-18' },
+  { id: 't16', memberId: 'wife', type: 'investment', category: 'Renda fixa', description: 'Tesouro Selic', amount: 380, month: '2026-02', date: '2026-02-21' },
+
+  { id: 't17', memberId: 'husband', type: 'income', category: 'Salário', description: 'Salário mensal', amount: 9200, month: '2026-03', date: '2026-03-05' },
+  { id: 't18', memberId: 'wife', type: 'income', category: 'Salário', description: 'Salário mensal', amount: 5400, month: '2026-03', date: '2026-03-05' },
+  { id: 't19', memberId: 'family', type: 'expense', category: 'Educação', description: 'Curso da família', amount: 900, month: '2026-03', date: '2026-03-11', dueDate: '2026-11-30' },
+  { id: 't20', memberId: 'husband', type: 'expense', category: 'Assinaturas', description: 'Streaming', amount: 89, month: '2026-03', date: '2026-03-12', dueDate: '2026-03-12' },
+  { id: 't21', memberId: 'wife', type: 'expense', category: 'Alimentação', description: 'Supermercado', amount: 1320, month: '2026-03', date: '2026-03-13', dueDate: '2026-03-13' },
+  { id: 't22', memberId: 'husband', type: 'investment', category: 'Fundos', description: 'FII mensal', amount: 300, month: '2026-03', date: '2026-03-20' },
+  { id: 't23', memberId: 'wife', type: 'investment', category: 'Cripto', description: 'Compra BTC', amount: 250, month: '2026-03', date: '2026-03-23' }
 ];
 
 function normalizeMemberId(value) {
@@ -72,7 +88,8 @@ function cloneSampleTransactions() {
   return sampleTransactions.map((item) => ({
     ...item,
     memberId: normalizeMemberId(item.memberId),
-    term: item.type === 'expense' ? classifyTerm(item.dueDate || item.date) : null
+    term: item.type === 'expense' ? classifyTerm(item.dueDate || item.date) : null,
+    isInvestmentReserve: Boolean(item.isInvestmentReserve || item.category === 'Reserva para investir')
   }));
 }
 
@@ -99,13 +116,13 @@ export function classifyTerm(dueDate) {
 
 function seedInvestmentsFromTransactions() {
   const mirrored = transactions
-    .filter((item) => item.type === 'expense' && item.isInvestmentReserve)
+    .filter((item) => item.type === 'investment' || (item.type === 'expense' && item.isInvestmentReserve))
     .map((item) => ({
       id: `inv-${item.id}`,
       memberId: item.memberId,
       date: item.date,
       amount: item.amount,
-      type: 'reserve',
+      type: item.type === 'investment' ? 'direct' : 'reserve',
       sourceTransactionId: item.id,
       createdAt: new Date().toISOString()
     }));
@@ -156,11 +173,9 @@ function calculateSummary(filteredTransactions) {
   const income = filteredTransactions.filter((item) => item.type === 'income').reduce((sum, item) => sum + item.amount, 0);
   const expenses = filteredTransactions.filter((item) => item.type === 'expense').reduce((sum, item) => sum + item.amount, 0);
   const investmentsFromReserves = filteredTransactions.filter((item) => item.type === 'expense' && item.isInvestmentReserve).reduce((sum, item) => sum + item.amount, 0);
-  const investmentsDirect = investments
-    .filter((item) => isMemberMatch(item, 'all') && filteredTransactions.find((tx) => tx.id === item.sourceTransactionId))
-    .reduce((sum, item) => sum + item.amount, 0);
-  const investmentsTotal = Math.max(investmentsFromReserves, investmentsDirect);
-  const outflow = expenses;
+  const directInvestments = filteredTransactions.filter((item) => item.type === 'investment').reduce((sum, item) => sum + item.amount, 0);
+  const investmentsTotal = directInvestments + investmentsFromReserves;
+  const outflow = expenses + directInvestments;
   return { income, expenses, investmentsTotal, outflow, balance: income - outflow };
 }
 
@@ -182,8 +197,10 @@ function buildDashboard({ month, member = 'all', from, to, term = 'all' }) {
     const data = filteredTransactions.filter((item) => item.memberId === memberItem.id);
     const income = data.filter((item) => item.type === 'income').reduce((sum, item) => sum + item.amount, 0);
     const expenses = data.filter((item) => item.type === 'expense').reduce((sum, item) => sum + item.amount, 0);
-    const investments = data.filter((item) => item.type === 'expense' && item.isInvestmentReserve).reduce((sum, item) => sum + item.amount, 0);
-    return { memberId: memberItem.id, memberName: memberItem.name, income, expenses, investments, balance: income - expenses };
+    const reserveInvestments = data.filter((item) => item.type === 'expense' && item.isInvestmentReserve).reduce((sum, item) => sum + item.amount, 0);
+    const directInvestments = data.filter((item) => item.type === 'investment').reduce((sum, item) => sum + item.amount, 0);
+    const investments = reserveInvestments + directInvestments;
+    return { memberId: memberItem.id, memberName: memberItem.name, income, expenses, investments, balance: income - expenses - directInvestments };
   });
 
   const termTotals = ['short', 'medium', 'long'].map((name) => ({
@@ -197,7 +214,8 @@ function buildDashboard({ month, member = 'all', from, to, term = 'all' }) {
     const data = filteredTransactions.filter((item) => item.month === monthItem);
     const income = data.filter((item) => item.type === 'income').reduce((sum, item) => sum + item.amount, 0);
     const expenses = data.filter((item) => item.type === 'expense').reduce((sum, item) => sum + item.amount, 0);
-    return { month: monthItem, income, expenses, balance: income - expenses };
+    const directInvestments = data.filter((item) => item.type === 'investment').reduce((sum, item) => sum + item.amount, 0);
+    return { month: monthItem, income, expenses, investments: directInvestments, balance: income - expenses - directInvestments };
   });
 
   return {
@@ -214,7 +232,7 @@ function buildDashboard({ month, member = 'all', from, to, term = 'all' }) {
     projection: {
       basedOnMonths: months.slice(-3),
       projectedNextMonthOutflow: months.length
-        ? Number((monthlyHistory.slice(-3).reduce((sum, item) => sum + item.expenses, 0) / Math.min(monthlyHistory.length, 3)).toFixed(2))
+        ? Number((monthlyHistory.slice(-3).reduce((sum, item) => sum + item.expenses + item.investments, 0) / Math.min(monthlyHistory.length, 3)).toFixed(2))
         : 0
     },
     monthlyHistory
@@ -234,6 +252,7 @@ function buildSuggestions(dashboard) {
 function getCategoryTemplates(type, category) {
   if (category && descriptionTemplatesByCategory[category]) return descriptionTemplatesByCategory[category];
   if (type === 'expense') return expenseCategories.flatMap((item) => descriptionTemplatesByCategory[item] || []);
+  if (type === 'investment') return investmentCategories.flatMap((item) => descriptionTemplatesByCategory[item] || []);
   if (type === 'income') return ['Salário mensal', 'Renda extra', 'Freelance', 'Bônus'];
   return ['Aporte em investimento'];
 }
@@ -243,7 +262,9 @@ function validateMember(memberId) {
 }
 
 function upsertInvestmentFromReserve(transaction) {
-  if (!(transaction.type === 'expense' && transaction.isInvestmentReserve)) {
+  const shouldMirror = transaction.type === 'investment' || (transaction.type === 'expense' && transaction.isInvestmentReserve);
+
+  if (!shouldMirror) {
     investments = investments.filter((item) => item.sourceTransactionId !== transaction.id);
     return;
   }
@@ -255,7 +276,7 @@ function upsertInvestmentFromReserve(transaction) {
     date: transaction.date,
     amount: transaction.amount,
     sourceTransactionId: transaction.id,
-    type: 'reserve',
+    type: transaction.type === 'investment' ? 'direct' : 'reserve',
     createdAt: existing?.createdAt || new Date().toISOString()
   };
 
@@ -338,8 +359,20 @@ app.post('/api/transactions', (req, res) => {
     return res.status(400).json({ message: 'Membro inválido.' });
   }
 
-  if (!['income', 'expense'].includes(type)) {
-    return res.status(400).json({ message: 'Tipo inválido. Use income ou expense.' });
+  if (!['income', 'expense', 'investment'].includes(type)) {
+    return res.status(400).json({ message: 'Tipo inválido. Use income, expense ou investment.' });
+  }
+
+  if (type === 'expense' && !expenseCategories.includes(category)) {
+    return res.status(400).json({ message: 'Categoria de despesa inválida.' });
+  }
+
+  if (type === 'investment' && !investmentCategories.includes(category)) {
+    return res.status(400).json({ message: 'Categoria de investimento inválida.' });
+  }
+
+  if (type === 'income' && !incomeCategories.includes(category)) {
+    return res.status(400).json({ message: 'Categoria de receita inválida.' });
   }
 
   const parsedAmount = Number(amount);
@@ -361,7 +394,7 @@ app.post('/api/transactions', (req, res) => {
     date: safeDate,
     dueDate: safeDueDate,
     term: type === 'expense' ? classifyTerm(safeDueDate) : null,
-    isInvestmentReserve: Boolean(isInvestmentReserve || category === 'Reserva para investir')
+    isInvestmentReserve: type === 'expense' ? Boolean(isInvestmentReserve || category === 'Reserva para investir') : false
   };
 
   transactions = [transaction, ...transactions];
@@ -380,7 +413,7 @@ app.patch('/api/transactions/:id', (req, res) => {
   };
 
   next.term = next.type === 'expense' ? classifyTerm(next.dueDate || next.date) : null;
-  next.isInvestmentReserve = Boolean(next.isInvestmentReserve || next.category === 'Reserva para investir');
+  next.isInvestmentReserve = next.type === 'expense' ? Boolean(next.isInvestmentReserve || next.category === 'Reserva para investir') : false;
 
   transactions = transactions.map((item) => (item.id === target.id ? next : item));
   upsertInvestmentFromReserve(next);

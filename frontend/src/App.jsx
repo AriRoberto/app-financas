@@ -43,6 +43,7 @@ function App() {
   const [members, setMembers] = useState([]);
   const [expenseCategories, setExpenseCategories] = useState([]);
   const [incomeCategories, setIncomeCategories] = useState([]);
+  const [investmentCategories, setInvestmentCategories] = useState([]);
   const [descriptionTemplates, setDescriptionTemplates] = useState([]);
   const [months, setMonths] = useState([]);
   const [transactions, setTransactions] = useState([]);
@@ -60,7 +61,11 @@ function App() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  const currentCategories = useMemo(() => (form.type === 'income' ? incomeCategories : expenseCategories), [form.type, incomeCategories, expenseCategories]);
+  const currentCategories = useMemo(() => {
+    if (form.type === 'income') return incomeCategories;
+    if (form.type === 'investment') return investmentCategories;
+    return expenseCategories;
+  }, [form.type, incomeCategories, investmentCategories, expenseCategories]);
 
   async function loadDescriptionTemplates(type, category) {
     const response = await fetch(`${API_URL}/api/description-templates?type=${type}&category=${encodeURIComponent(category || '')}`);
@@ -90,6 +95,7 @@ function App() {
     setMembers(membersData.members || []);
     setExpenseCategories(categoriesData.expenseCategories || categoriesData.categories || []);
     setIncomeCategories(categoriesData.incomeCategories || []);
+    setInvestmentCategories(categoriesData.investmentCategories || []);
 
     const category = categoriesData.expenseCategories?.[0] || 'Outros';
     setForm((old) => ({ ...old, memberId: membersData.members?.[0]?.id || 'husband', category }));
@@ -162,7 +168,7 @@ function App() {
       const payload = {
         ...form,
         amount: Number(form.amount),
-        isInvestmentReserve: form.isInvestmentReserve || form.category === 'Reserva para investir'
+        isInvestmentReserve: form.type === 'expense' && (form.isInvestmentReserve || form.category === 'Reserva para investir')
       };
       const response = await fetch(`${API_URL}/api/transactions`, {
         method: 'POST',
@@ -298,11 +304,16 @@ function App() {
             <label>Tipo
               <select value={form.type} onChange={async (e) => {
                 const nextType = e.target.value;
-                const nextCategory = nextType === 'income' ? incomeCategories[0] : expenseCategories[0];
+                const nextCategory = nextType === 'income'
+                  ? incomeCategories[0]
+                  : nextType === 'investment'
+                    ? investmentCategories[0]
+                    : expenseCategories[0];
                 setForm((old) => ({ ...old, type: nextType, category: nextCategory }));
                 await loadDescriptionTemplates(nextType, nextCategory);
               }}>
                 <option value="expense">Despesa</option>
+                <option value="investment">Investimento</option>
                 <option value="income">Receita</option>
               </select>
             </label>
@@ -331,10 +342,12 @@ function App() {
             <label>Vencimento (prazo)
               <input type="date" value={form.dueDate} onChange={(e) => setForm((old) => ({ ...old, dueDate: e.target.value }))} />
             </label>
-            <label className="checkbox">
-              <input type="checkbox" checked={form.isInvestmentReserve} onChange={(e) => setForm((old) => ({ ...old, isInvestmentReserve: e.target.checked }))} />
-              Reserva para investir
-            </label>
+            {form.type === 'expense' ? (
+              <label className="checkbox">
+                <input type="checkbox" checked={form.isInvestmentReserve} onChange={(e) => setForm((old) => ({ ...old, isInvestmentReserve: e.target.checked }))} />
+                Reserva para investir
+              </label>
+            ) : null}
             <div className="form-actions">
               <button disabled={saving} type="submit">{saving ? 'Salvando...' : 'Salvar'}</button>
               <button type="button" className="ghost" onClick={handleRestoreDemoData}>Restaurar dados de exemplo</button>

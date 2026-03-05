@@ -25,6 +25,8 @@ npm run dev
 
 Abra: `http://localhost:5173`
 
+A massa de exemplo já vem com lançamentos de marido e esposa em múltiplos meses, incluindo despesas e investimentos para testes.
+
 ## Uso rápido
 1. Selecione o membro no filtro global: `all`, `marido`, `esposa` ou `familia`.
 2. Ajuste período (mês, 3 meses, ano, custom) e prazo (`short`, `medium`, `long`).
