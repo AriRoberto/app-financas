@@ -25,6 +25,39 @@ function getPresetRange(preset) {
   return { from: '', to: '' };
 }
 
+
+function capitalizeFirst(text) {
+  if (!text) return '';
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+function memberLabel(memberId) {
+  const labels = {
+    husband: 'Marido',
+    wife: 'Esposa',
+    family: 'Familia'
+  };
+  return labels[memberId] || capitalizeFirst(memberId);
+}
+
+function typeLabel(type) {
+  const labels = {
+    expense: 'Despesa',
+    income: 'Receita',
+    investment: 'Investimento'
+  };
+  return labels[type] || type;
+}
+
+function termLabel(term) {
+  const labels = {
+    short: 'Curto prazo',
+    medium: 'Médio prazo',
+    long: 'Longo prazo'
+  };
+  return labels[term] || '-';
+}
+
 const initialForm = {
   memberId: 'husband',
   type: 'expense',
@@ -298,7 +331,7 @@ function App() {
         <label>Membro
           <select value={selectedMember} onChange={(e) => setSelectedMember(e.target.value)}>
             <option value="all">Todos</option>
-            {members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}
+            {members.map((member) => <option key={member.id} value={member.id}>{memberLabel(member.id)}</option>)}
           </select>
         </label>
         <label>Prazo
@@ -342,7 +375,7 @@ function App() {
       <section className="member-income-grid">
         {dashboard?.byMember?.map((member) => (
           <article className="card" key={member.memberId}>
-            <p>{member.memberName}</p>
+            <p>{memberLabel(member.memberId)}</p>
             <strong>{currency.format(member.income)}</strong>
             <small>Despesas: {currency.format(member.expenses)}</small>
           </article>
@@ -355,7 +388,7 @@ function App() {
           <form onSubmit={submitTransaction} className="form-grid">
             <label>Membro
               <select value={form.memberId} onChange={(e) => setForm((old) => ({ ...old, memberId: e.target.value }))}>
-                {members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}
+                {members.map((member) => <option key={member.id} value={member.id}>{memberLabel(member.id)}</option>)}
               </select>
             </label>
             <label>Tipo
@@ -482,10 +515,10 @@ function App() {
                 {transactions.map((item) => (
                   <tr key={item.id}>
                     <td>{item.date}</td>
-                    <td>{item.memberId}</td>
-                    <td>{item.type}</td>
+                    <td>{memberLabel(item.memberId)}</td>
+                    <td>{typeLabel(item.type)}</td>
                     <td>{item.category}</td>
-                    <td>{item.term || '-'}</td>
+                    <td>{termLabel(item.term)}</td>
                     <td>{currency.format(item.amount)}</td>
                   </tr>
                 ))}
