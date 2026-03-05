@@ -11,7 +11,7 @@ Projeto full-stack para controlar receitas e despesas familiares com foco em:
 - Filtro global por membro (`husband|wife|family|all`), período e prazo (`short|medium|long`).
 - Dashboard com receita total, despesas, investimento espelhado, totais por membro e histórico mensal.
 - Massa de dados de exemplo ampliada para marido e esposa (vários meses, despesas e investimentos) para validar filtros e relatórios.
-- Relatório de saídas por categoria + gráfico de pizza por categoria selecionada (clique na categoria para atualizar o gráfico).
+- Quadro de categorias + gráfico de pizza por categoria selecionada (despesas, receitas e investimentos).
 - Regra de prazo para despesas:
   - `short`: até 31/12 do ano corrente
   - `medium`: até 24 meses

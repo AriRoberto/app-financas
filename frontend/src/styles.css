@@ -319,6 +319,21 @@ td {
   padding-left: 0;
 }
 
+.category-list.clickable.nested {
+  margin-top: 6px;
+}
+
+.group-title {
+  margin: 6px 0;
+  font-weight: 700;
+  color: #334155;
+}
+
+.empty-row {
+  color: #64748b;
+  font-size: 0.9rem;
+}
+
 .category-btn {
   width: 100%;
   display: flex;

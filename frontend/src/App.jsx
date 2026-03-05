@@ -55,8 +55,7 @@ function App() {
   const [periodPreset, setPeriodPreset] = useState('month');
   const [fromDate, setFromDate] = useState(getPresetRange('month').from);
   const [toDate, setToDate] = useState(getPresetRange('month').to);
-  const [reportData, setReportData] = useState([]);
-  const [selectedCategory, setSelectedCategory] = useState('');
+  const [selectedCategoryKey, setSelectedCategoryKey] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -104,12 +103,11 @@ function App() {
 
   async function loadData(month = selectedMonth) {
     const params = queryParams(month);
-    const [dashboardRes, suggestionsRes, transactionsRes, monthsRes, reportRes, investmentsRes] = await Promise.all([
+    const [dashboardRes, suggestionsRes, transactionsRes, monthsRes, investmentsRes] = await Promise.all([
       fetch(`${API_URL}/api/dashboard?${params}`),
       fetch(`${API_URL}/api/suggestions?${params}`),
       fetch(`${API_URL}/api/transactions?${params}`),
       fetch(`${API_URL}/api/months?member=${selectedMember}`),
-      fetch(`${API_URL}/reports/expenses-by-category?member=${selectedMember}&from=${fromDate}&to=${toDate}`),
       fetch(`${API_URL}/api/investments?member=${selectedMember}&from=${fromDate}&to=${toDate}`)
     ]);
 
@@ -117,14 +115,12 @@ function App() {
     const suggestionsData = await suggestionsRes.json();
     const transactionsData = await transactionsRes.json();
     const monthsData = await monthsRes.json();
-    const reportJson = await reportRes.json();
     const investmentsJson = await investmentsRes.json();
 
     setDashboard(dashboardData);
     setSuggestions(suggestionsData.suggestions || []);
     setTransactions(transactionsData.transactions || []);
     setMonths(monthsData.months || []);
-    setReportData(reportJson.categories || []);
     setInvestments(investmentsJson);
   }
 
@@ -149,15 +145,54 @@ function App() {
     if (!loading) loadData(selectedMonth).catch((err) => setError(err.message));
   }, [selectedMember, selectedTerm, fromDate, toDate]);
 
+  const categoriesByType = useMemo(() => {
+    const grouped = {
+      expense: {},
+      income: {},
+      investment: {}
+    };
+
+    transactions.forEach((item) => {
+      if (!grouped[item.type]) return;
+      grouped[item.type][item.category] = (grouped[item.type][item.category] || 0) + item.amount;
+    });
+
+    const normalize = (type) => {
+      const rows = Object.entries(grouped[type])
+        .map(([category, total]) => ({ type, category, total }))
+        .sort((a, b) => b.total - a.total);
+
+      const totalByType = rows.reduce((sum, row) => sum + row.total, 0);
+
+      return rows.map((row) => ({
+        ...row,
+        percentage: totalByType > 0 ? Number(((row.total / totalByType) * 100).toFixed(2)) : 0,
+        totalByType,
+        key: `${row.type}:${row.category}`
+      }));
+    };
+
+    return {
+      expense: normalize('expense'),
+      income: normalize('income'),
+      investment: normalize('investment')
+    };
+  }, [transactions]);
+
+  const allCategoryRows = useMemo(
+    () => [...categoriesByType.expense, ...categoriesByType.income, ...categoriesByType.investment],
+    [categoriesByType]
+  );
+
   useEffect(() => {
-    if (!reportData.length) {
-      setSelectedCategory('');
+    if (!allCategoryRows.length) {
+      setSelectedCategoryKey('');
       return;
     }
 
-    const exists = reportData.some((item) => item.category === selectedCategory);
-    if (!exists) setSelectedCategory(reportData[0].category);
-  }, [reportData, selectedCategory]);
+    const exists = allCategoryRows.some((item) => item.key === selectedCategoryKey);
+    if (!exists) setSelectedCategoryKey(allCategoryRows[0].key);
+  }, [allCategoryRows, selectedCategoryKey]);
 
   async function submitTransaction(event) {
     event.preventDefault();
@@ -211,8 +246,8 @@ function App() {
   }
 
   const selectedCategoryData = useMemo(
-    () => reportData.find((item) => item.category === selectedCategory) || null,
-    [reportData, selectedCategory]
+    () => allCategoryRows.find((item) => item.key === selectedCategoryKey) || null,
+    [allCategoryRows, selectedCategoryKey]
   );
 
   const pieStyle = useMemo(() => {
@@ -357,19 +392,31 @@ function App() {
 
         <article className="panel">
           <h2>Quadro de categorias + gráfico por categoria</h2>
-          <p className="panel-help">Clique em uma categoria de despesa para ver o gráfico de pizza ao lado.</p>
+          <p className="panel-help">Clique em uma categoria para ver o gráfico ao lado (despesas, receitas e investimentos).</p>
           <div className="category-insights">
             <ul className="category-list clickable">
-              {reportData.map((item) => (
-                <li key={item.category}>
-                  <button
-                    type="button"
-                    className={selectedCategory === item.category ? 'category-btn active' : 'category-btn'}
-                    onClick={() => setSelectedCategory(item.category)}
-                  >
-                    <span>{item.category}</span>
-                    <strong>{currency.format(item.total)} ({item.percentage}%)</strong>
-                  </button>
+              {[
+                { type: 'expense', title: 'Despesas', rows: categoriesByType.expense },
+                { type: 'income', title: 'Receitas', rows: categoriesByType.income },
+                { type: 'investment', title: 'Investimentos', rows: categoriesByType.investment }
+              ].map((group) => (
+                <li key={group.type}>
+                  <p className="group-title">{group.title}</p>
+                  <ul className="category-list clickable nested">
+                    {group.rows.map((item) => (
+                      <li key={item.key}>
+                        <button
+                          type="button"
+                          className={selectedCategoryKey === item.key ? 'category-btn active' : 'category-btn'}
+                          onClick={() => setSelectedCategoryKey(item.key)}
+                        >
+                          <span>{item.category}</span>
+                          <strong>{currency.format(item.total)} ({item.percentage}%)</strong>
+                        </button>
+                      </li>
+                    ))}
+                    {!group.rows.length ? <li className="empty-row">Sem lançamentos.</li> : null}
+                  </ul>
                 </li>
               ))}
             </ul>
@@ -378,7 +425,8 @@ function App() {
               <div className="pie" style={pieStyle} />
               {selectedCategoryData ? (
                 <p>
-                  <strong>{selectedCategoryData.category}</strong> representa {selectedCategoryData.percentage}% das despesas no período.
+                  <strong>{selectedCategoryData.category}</strong> representa {selectedCategoryData.percentage}% dentro de{' '}
+                  <strong>{selectedCategoryData.type === 'expense' ? 'despesas' : selectedCategoryData.type === 'income' ? 'receitas' : 'investimentos'}</strong> no período.
                 </p>
               ) : (
                 <p>Sem dados para o período selecionado.</p>
