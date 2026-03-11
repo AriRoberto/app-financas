@@ -383,3 +383,55 @@ td {
 .table-actions button {
   grid-column: auto;
 }
+
+.recovery-alert {
+  margin-bottom: 12px;
+  border-left: 4px solid #2563eb;
+}
+
+.recovery-alert.risk,
+.severity-badge.risk {
+  border-color: #b54708;
+  background: #fffaeb;
+}
+
+.recovery-alert.critical,
+.severity-badge.critical {
+  border-color: #b42318;
+  background: #fef3f2;
+}
+
+.recovery-module .severity-badge {
+  border: 1px solid #bfdbfe;
+  border-radius: 10px;
+  background: #eff6ff;
+  padding: 10px;
+}
+
+.recovery-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.recovery-metrics div {
+  border: 1px solid #dbe4f0;
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.recovery-metrics span {
+  display: block;
+  color: #64748b;
+  font-size: 0.8rem;
+}
+
+.recovery-metrics strong {
+  font-size: 1rem;
+}
+
+.recovery-horizons {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}

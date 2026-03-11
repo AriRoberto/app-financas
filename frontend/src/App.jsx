@@ -58,6 +58,14 @@ function termLabel(term) {
   return labels[term] || '-';
 }
 
+
+function recoverySeverityClass(level) {
+  if (level >= 3) return 'critical';
+  if (level >= 2) return 'risk';
+  if (level >= 1) return 'attention';
+  return 'stable';
+}
+
 const initialForm = {
   memberId: 'husband',
   type: 'expense',
@@ -96,6 +104,7 @@ function App() {
   const [connectingBank, setConnectingBank] = useState(false);
   const [bankInstitution, setBankInstitution] = useState('BB');
   const [bankConnections, setBankConnections] = useState([]);
+  const [recoveryPlan, setRecoveryPlan] = useState(null);
 
   const currentCategories = useMemo(() => {
     if (form.type === 'income') return incomeCategories;
@@ -140,13 +149,14 @@ function App() {
 
   async function loadData(month = selectedMonth) {
     const params = queryParams(month);
-    const [dashboardRes, suggestionsRes, transactionsRes, monthsRes, investmentsRes, bankConnectionsRes] = await Promise.all([
+    const [dashboardRes, suggestionsRes, transactionsRes, monthsRes, investmentsRes, bankConnectionsRes, recoveryPlanRes] = await Promise.all([
       fetch(`${API_URL}/api/dashboard?${params}`),
       fetch(`${API_URL}/api/suggestions?${params}`),
       fetch(`${API_URL}/api/transactions?${params}`),
       fetch(`${API_URL}/api/months?member=${selectedMember}`),
       fetch(`${API_URL}/api/investments?member=${selectedMember}&from=${fromDate}&to=${toDate}`),
-      fetch(`${API_URL}/api/banks/connections`)
+      fetch(`${API_URL}/api/banks/connections`),
+      fetch(`${API_URL}/api/recovery/plan?${params}`)
     ]);
 
     const dashboardData = await dashboardRes.json();
@@ -155,6 +165,7 @@ function App() {
     const monthsData = await monthsRes.json();
     const investmentsJson = await investmentsRes.json();
     const connectionsJson = await bankConnectionsRes.json();
+    const recoveryPlanJson = await recoveryPlanRes.json();
 
     setDashboard(dashboardData);
     setSuggestions(suggestionsData.suggestions || []);
@@ -162,6 +173,7 @@ function App() {
     setMonths(monthsData.months || []);
     setInvestments(investmentsJson);
     setBankConnections(connectionsJson.connections || []);
+    setRecoveryPlan(recoveryPlanJson);
   }
 
   async function boot() {
@@ -417,6 +429,15 @@ function App() {
 
       {error ? <p className="error">{error}</p> : null}
 
+      {recoveryPlan?.entryPoints?.passive?.shouldSurface ? (
+        <section className={`panel recovery-alert ${recoverySeverityClass(recoveryPlan.severity)}`}>
+          <h2>Plano de recuperação financeira</h2>
+          <p>{recoveryPlan.entryPoints.passive.message}</p>
+          <p><strong>Próxima ação recomendada:</strong> {recoveryPlan.nextBestAction?.title}</p>
+        </section>
+      ) : null}
+
+
       <section className="panel bank-panel">
         <h2>Conectar banco (Open Finance / AISP)</h2>
         <p className="panel-help">Conexão com consentimento explícito: BB, Itaú, CEF, Santander, Nubank ou Bradesco.</p>
@@ -601,11 +622,56 @@ function App() {
           <h2>Totais por prazo</h2>
           <ul className="category-list">
             {dashboard?.termTotals?.map((item) => (
-              <li key={item.term}>{item.term}: {currency.format(item.total)}</li>
+              <li key={item.term}>{termLabel(item.term)}: {currency.format(item.total)}</li>
             ))}
           </ul>
           <h3>Sugestões</h3>
           <ul className="suggestions">{suggestions.map((text) => <li key={text}>{text}</li>)}</ul>
+        </article>
+
+
+        <article className="panel recovery-module">
+          <h2>Plano de recuperação financeira</h2>
+          <p className="panel-help">Ferramenta de apoio com orientações práticas por prazo para estabilizar e evoluir sua vida financeira.</p>
+
+          {recoveryPlan ? (
+            <>
+              <p className={`severity-badge ${recoverySeverityClass(recoveryPlan.severity)}`}>
+                Nível atual: <strong>{recoveryPlan.severityLabel}</strong> (score {recoveryPlan.score})
+              </p>
+              <p>{recoveryPlan.summary}</p>
+
+              <div className="recovery-metrics">
+                <div><span>Saldo de caixa projetado</span><strong>{currency.format(recoveryPlan.metrics.saldoCaixaProjetado || 0)}</strong></div>
+                <div><span>Comprometimento com dívida</span><strong>{((recoveryPlan.metrics.comprometimentoRendaDivida || 0) * 100).toFixed(0)}%</strong></div>
+                <div><span>Reserva estimada</span><strong>{(recoveryPlan.metrics.reservaMeses || 0).toFixed(1)} meses</strong></div>
+              </div>
+
+              <h3>Ações por prazo</h3>
+              <div className="recovery-horizons">
+                <div>
+                  <h4>Curto prazo (0-3 meses)</h4>
+                  <ul className="suggestions">
+                    {recoveryPlan.horizons.short.map((action) => <li key={action.id}>{action.title}</li>)}
+                  </ul>
+                </div>
+                <div>
+                  <h4>Médio prazo (3-12 meses)</h4>
+                  <ul className="suggestions">
+                    {recoveryPlan.horizons.medium.map((action) => <li key={action.id}>{action.title}</li>)}
+                  </ul>
+                </div>
+                <div>
+                  <h4>Longo prazo (12+ meses)</h4>
+                  <ul className="suggestions">
+                    {recoveryPlan.horizons.long.map((action) => <li key={action.id}>{action.title}</li>)}
+                  </ul>
+                </div>
+              </div>
+            </>
+          ) : (
+            <p>Carregando plano de recuperação...</p>
+          )}
         </article>
 
         <article className="panel">

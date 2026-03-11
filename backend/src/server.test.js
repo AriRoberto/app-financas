@@ -128,3 +128,19 @@ test('aceita conexão com banco BRADESCO', async () => {
     assert.ok(data.redirectUrl.includes('/api/banks/callback?code='));
   });
 });
+
+
+test('retorna plano de recuperação financeira com ações por prazo', async () => {
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/recovery/plan?member=all`);
+    assert.equal(response.status, 200);
+    const data = await response.json();
+
+    assert.ok(typeof data.severity === 'number');
+    assert.ok(data.severityLabel);
+    assert.ok(Array.isArray(data.horizons.short));
+    assert.ok(Array.isArray(data.horizons.medium));
+    assert.ok(Array.isArray(data.horizons.long));
+    assert.ok(data.nextBestAction?.title);
+  });
+});

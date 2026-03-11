@@ -16,6 +16,7 @@ Projeto full-stack para controlar receitas e despesas familiares com foco em:
 - Conexão bancária com botão **Conectar Banco**, consentimento Open Finance, sincronização manual e revogação.
 - Instituições disponíveis no fluxo AISP: BB, ITAU, CEF, SANTANDER, NUBANK e BRADESCO.
 
+- Módulo de **Plano de recuperação financeira** com diagnóstico de severidade e ações por curto/médio/longo prazo na interface.
 - Especificação funcional do módulo de recuperação financeira em `docs/ESPEC_RECUPERACAO_FINANCEIRA.md`.
 
 ## Open Finance (fluxo)

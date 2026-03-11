@@ -279,6 +279,196 @@ function buildSuggestions(dashboard) {
   };
 }
 
+function average(values) {
+  if (!values.length) return 0;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function stddev(values) {
+  if (values.length < 2) return 0;
+  const avg = average(values);
+  const variance = average(values.map((value) => (value - avg) ** 2));
+  return Math.sqrt(variance);
+}
+
+function mapSeverity(score) {
+  if (score >= 7) return 3;
+  if (score >= 4) return 2;
+  if (score >= 2) return 1;
+  return 0;
+}
+
+function severityLabel(severity) {
+  return ['Estável', 'Atenção', 'Risco', 'Crítico'][severity] || 'Estável';
+}
+
+function buildRecoveryPlan({ month, member = 'all', from, to }) {
+  const filtered = filterTransactions({ month, member, from, to });
+  const monthlyHistory = getAvailableMonths(filtered).map((monthItem) => {
+    const rows = filtered.filter((item) => item.month === monthItem);
+    const income = rows.filter((item) => item.type === 'income').reduce((sum, item) => sum + item.amount, 0);
+    const expenses = rows.filter((item) => item.type === 'expense').reduce((sum, item) => sum + item.amount, 0);
+    return { month: monthItem, income, expenses, rows };
+  });
+
+  const recent = monthlyHistory.slice(-3);
+  const incomeAvg = average(recent.map((item) => item.income));
+  const incomeVolatility = incomeAvg > 0 ? stddev(recent.map((item) => item.income)) / incomeAvg : 0;
+
+  const essentialCategories = new Set(['Moradia', 'Alimentação', 'Saúde', 'Transporte', 'Educação']);
+  const essentialExpenses = recent
+    .flatMap((item) => item.rows)
+    .filter((item) => item.type === 'expense' && essentialCategories.has(item.category))
+    .reduce((sum, item) => sum + item.amount, 0) / Math.max(recent.length, 1);
+
+  const discretionaryExpenses = recent
+    .flatMap((item) => item.rows)
+    .filter((item) => item.type === 'expense' && !essentialCategories.has(item.category))
+    .reduce((sum, item) => sum + item.amount, 0) / Math.max(recent.length, 1);
+
+  const debtService = recent
+    .flatMap((item) => item.rows)
+    .filter((item) => item.type === 'expense' && (item.term === 'medium' || item.term === 'long'))
+    .reduce((sum, item) => sum + item.amount, 0) / Math.max(recent.length, 1);
+
+  const investmentReserve = investments
+    .filter((item) => isMemberMatch(item, member))
+    .reduce((sum, item) => sum + item.amount, 0);
+
+  const crd = incomeAvg > 0 ? debtService / incomeAvg : 0;
+  const scp = incomeAvg - (essentialExpenses + discretionaryExpenses + debtService);
+  const cashBufferMonths = essentialExpenses > 0 ? investmentReserve / essentialExpenses : 0;
+
+  const drivers = [];
+  let score = 0;
+  if (scp < 0) {
+    score += 2;
+    drivers.push({ code: 'PRESSAO_CAIXA', weight: 2, value: Number(scp.toFixed(2)) });
+  }
+  if (crd >= 0.45) {
+    score += 3;
+    drivers.push({ code: 'DIVIDA_ALTA', weight: 3, value: Number(crd.toFixed(2)) });
+  } else if (crd >= 0.3) {
+    score += 2;
+    drivers.push({ code: 'DIVIDA_MODERADA', weight: 2, value: Number(crd.toFixed(2)) });
+  }
+  if (cashBufferMonths < 1) {
+    score += 1;
+    drivers.push({ code: 'RESERVA_BAIXA', weight: 1, value: Number(cashBufferMonths.toFixed(2)) });
+  }
+  if (incomeVolatility >= 0.35) {
+    score += 1;
+    drivers.push({ code: 'RENDA_VOLATIL', weight: 1, value: Number(incomeVolatility.toFixed(2)) });
+  }
+
+  const severity = mapSeverity(score);
+  const debtBand = debtService >= 5000 ? 'alta' : debtService >= 1000 ? 'media' : 'baixa';
+  const highVolatility = incomeVolatility >= 0.35;
+
+  const shortActions = [
+    {
+      id: 'short-1',
+      horizon: 'short',
+      title: 'Mapear e congelar gastos não essenciais por 30 dias',
+      description: 'Concentre o corte em lazer e assinaturas para gerar alívio imediato de caixa.',
+      priority: 1,
+      status: 'nao_iniciada',
+      estimatedMonthlyImpact: Number((discretionaryExpenses * 0.25).toFixed(2))
+    },
+    {
+      id: 'short-2',
+      horizon: 'short',
+      title: debtBand === 'alta' ? 'Renegociar dívida com maior juros nesta semana' : 'Revisar parcelamentos ativos e datas de vencimento',
+      description: 'Priorize reduzir juros e alinhar vencimentos próximos da data de recebimento.',
+      priority: 2,
+      status: 'nao_iniciada',
+      estimatedMonthlyImpact: Number((debtService * 0.15).toFixed(2))
+    }
+  ];
+
+  const mediumActions = [
+    {
+      id: 'medium-1',
+      horizon: 'medium',
+      title: 'Adotar plano de quitação (avalanche)',
+      description: 'Direcione sobra mensal para dívidas com maior custo efetivo até reduzir o comprometimento da renda.',
+      priority: 1,
+      status: 'nao_iniciada',
+      estimatedMonthlyImpact: Number((debtService * 0.2).toFixed(2))
+    },
+    {
+      id: 'medium-2',
+      horizon: 'medium',
+      title: highVolatility ? 'Criar orçamento semanal flexível para renda variável' : 'Definir teto fixo por categoria e revisão quinzenal',
+      description: highVolatility
+        ? 'Divida o orçamento em envelopes semanais para reduzir risco de falta de caixa no fim do mês.'
+        : 'Ajuste hábitos com metas simples de gasto por categoria.',
+      priority: 2,
+      status: 'nao_iniciada',
+      estimatedMonthlyImpact: Number((discretionaryExpenses * 0.15).toFixed(2))
+    }
+  ];
+
+  const longActions = [
+    {
+      id: 'long-1',
+      horizon: 'long',
+      title: 'Construir reserva de emergência até 6 meses de despesas essenciais',
+      description: 'Após estabilização, automatize aportes para formar proteção financeira consistente.',
+      priority: 1,
+      status: 'nao_iniciada',
+      estimatedMonthlyImpact: Number((essentialExpenses * 0.1).toFixed(2))
+    },
+    {
+      id: 'long-2',
+      horizon: 'long',
+      title: 'Revisar metas patrimoniais e proteção financeira anual',
+      description: 'Consolide disciplina financeira com metas anuais e revisão de riscos.',
+      priority: 2,
+      status: 'nao_iniciada',
+      estimatedMonthlyImpact: 0
+    }
+  ];
+
+  const summary = severity >= 2
+    ? 'Percebemos sinais de pressão financeira. Vamos priorizar ações práticas para recuperar o equilíbrio com segurança.'
+    : 'Seu cenário está sob controle, mas há oportunidades de fortalecer sua segurança financeira.';
+
+  return {
+    generatedAt: new Date().toISOString(),
+    severity,
+    severityLabel: severityLabel(severity),
+    score,
+    summary,
+    metrics: {
+      rendaMedia: Number(incomeAvg.toFixed(2)),
+      despesasEssenciais: Number(essentialExpenses.toFixed(2)),
+      despesasDiscricionarias: Number(discretionaryExpenses.toFixed(2)),
+      comprometimentoRendaDivida: Number(crd.toFixed(2)),
+      saldoCaixaProjetado: Number(scp.toFixed(2)),
+      reservaMeses: Number(cashBufferMonths.toFixed(2)),
+      volatilidadeRenda: Number(incomeVolatility.toFixed(2))
+    },
+    drivers,
+    entryPoints: {
+      passive: {
+        shouldSurface: severity >= 2,
+        message: severity >= 2 ? 'Detectamos um momento de aperto. Abra seu plano de recuperação e foque nas ações de curto prazo.' : ''
+      },
+      active: {
+        title: 'Plano de Recuperação',
+        available: true
+      }
+    },
+    horizons: {
+      short: shortActions,
+      medium: mediumActions,
+      long: longActions
+    },
+    nextBestAction: shortActions[0]
+  };
+}
+
 function getCategoryTemplates(type, category) {
   if (category && descriptionTemplatesByCategory[category]) return descriptionTemplatesByCategory[category];
   if (type === 'expense') return expenseCategories.flatMap((item) => descriptionTemplatesByCategory[item] || []);
@@ -479,6 +669,15 @@ app.get('/api/suggestions', (req, res) => {
   res.json(buildSuggestions(dashboard));
 });
 
+app.get('/api/recovery/plan', (req, res) => {
+  const month = isValidMonth(req.query.month || '') ? req.query.month : undefined;
+  const member = req.query.member || 'all';
+  const from = req.query.from || '';
+  const to = req.query.to || '';
+  const plan = buildRecoveryPlan({ month, member, from, to });
+  res.json(plan);
+});
+
 app.get('/api/investments', (req, res) => {
   const member = req.query.member || 'all';
   const from = req.query.from;
@@ -665,6 +864,7 @@ app.post('/api/banks/maintenance/purge', (_req, res) => {
 export {
   app,
   buildDashboard,
+  buildRecoveryPlan,
   filterTransactions,
   seedInvestmentsFromTransactions,
   upsertInvestmentFromReserve,
