@@ -65,3 +65,31 @@ Use `.env.example` e configure no ambiente:
 
 ## Como rodar
 Veja `docs/COMO_RODAR_LOCAL.md`.
+
+
+## Open Finance real (Pluggy / My Pluggy)
+- `OPEN_FINANCE_MOCK=true` mantém o mock local atual.
+- `OPEN_FINANCE_MOCK=false` ativa integração real com Pluggy usando consentimento (sem scraping e sem senha bancária no app).
+- Fluxo real:
+  1. backend gera API Key Pluggy com `AISP_CLIENT_ID` + `AISP_CLIENT_SECRET`;
+  2. backend cria `connectToken` em `POST /connect_token`;
+  3. frontend abre Pluggy Connect Widget;
+  4. sucesso do widget finaliza em `GET /api/banks/callback?state&itemId`;
+  5. sync traz contas e transações.
+- Nota produção: `AISP_REDIRECT_URI` deve ser HTTPS.
+
+### Credenciais My Pluggy
+1. Criar conta em My Pluggy.
+2. Criar aplicação e copiar `clientId`/`clientSecret`.
+3. Configurar `.env`:
+   - `OPEN_FINANCE_MOCK=false`
+   - `AISP_CLIENT_ID=<clientId>`
+   - `AISP_CLIENT_SECRET=<clientSecret>`
+   - `AISP_REDIRECT_URI=https://seu-dominio/api/banks/callback`
+
+### Instituições do app e resolução no Pluggy
+Source of truth do app:
+- BB, ITAU, CEF, SANTANDER, NUBANK, BRADESCO.
+
+O backend tenta resolver automaticamente `institution_key -> connectorId` no Pluggy com heurística por nome/tags e cache local.
+Quando não encontrar conector equivalente, a conexão fica com status `UNSUPPORTED`, sem quebrar UI.

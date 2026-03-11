@@ -103,6 +103,7 @@ function App() {
   const [error, setError] = useState('');
   const [connectingBank, setConnectingBank] = useState(false);
   const [bankInstitution, setBankInstitution] = useState('BB');
+  const [bankInstitutions, setBankInstitutions] = useState([]);
   const [bankConnections, setBankConnections] = useState([]);
   const [recoveryPlan, setRecoveryPlan] = useState(null);
 
@@ -129,18 +130,21 @@ function App() {
   }
 
   async function loadStaticData() {
-    const [membersRes, categoriesRes] = await Promise.all([
+    const [membersRes, categoriesRes, institutionsRes] = await Promise.all([
       fetch(`${API_URL}/api/members`),
-      fetch(`${API_URL}/api/categories`)
+      fetch(`${API_URL}/api/categories`),
+      fetch(`${API_URL}/api/banks/institutions`)
     ]);
 
     const membersData = await membersRes.json();
     const categoriesData = await categoriesRes.json();
+    const institutionsData = await institutionsRes.json();
 
     setMembers(membersData.members || []);
     setExpenseCategories(categoriesData.expenseCategories || categoriesData.categories || []);
     setIncomeCategories(categoriesData.incomeCategories || []);
     setInvestmentCategories(categoriesData.investmentCategories || []);
+    setBankInstitutions(institutionsData.institutions || []);
 
     const category = categoriesData.expenseCategories?.[0] || 'Outros';
     setForm((old) => ({ ...old, memberId: membersData.members?.[0]?.id || 'husband', category }));
@@ -247,6 +251,33 @@ function App() {
   }, [allCategoryRows, selectedCategoryKey]);
 
 
+
+  async function openPluggyWidget(connectToken, state) {
+    if (!window.PluggyConnect) {
+      throw new Error('Pluggy Connect indisponível no navegador.');
+    }
+
+    return new Promise((resolve, reject) => {
+      const pluggy = new window.PluggyConnect({
+        connectToken,
+        includeSandbox: true,
+        onSuccess: async (itemData) => {
+          try {
+            const itemId = itemData?.itemId || itemData?.item?.id;
+            const callbackRes = await fetch(`${API_URL}/api/banks/callback?state=${encodeURIComponent(state)}&itemId=${encodeURIComponent(itemId || '')}`);
+            if (!callbackRes.ok) throw new Error('Falha ao concluir callback com item Pluggy.');
+            resolve();
+          } catch (err) {
+            reject(err);
+          }
+        },
+        onError: () => reject(new Error('Falha no fluxo Pluggy Connect.')),
+        onClose: () => reject(new Error('Conexão cancelada pelo usuário.'))
+      });
+      pluggy.init();
+    });
+  }
+
   async function handleConnectBank() {
     setConnectingBank(true);
     setError('');
@@ -254,14 +285,25 @@ function App() {
       const response = await fetch(`${API_URL}/api/banks/connect`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ institution: bankInstitution, scopes: ['accounts', 'transactions'] })
+        body: JSON.stringify({ institution_key: bankInstitution, scopes: ['accounts', 'transactions'] })
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Não foi possível conectar o banco.');
 
-      const callbackResponse = await fetch(data.redirectUrl);
-      if (!callbackResponse.ok) {
-        throw new Error('Falha ao concluir consentimento da conexão bancária.');
+      if (data.status === 'UNSUPPORTED') {
+        await loadData(selectedMonth);
+        throw new Error(data.message || 'Instituição ainda não suportada pelo agregador.');
+      }
+
+      if (data.redirectUrl) {
+        const callbackResponse = await fetch(data.redirectUrl);
+        if (!callbackResponse.ok) {
+          throw new Error('Falha ao concluir consentimento da conexão bancária.');
+        }
+      } else if (data.connectToken && data.state) {
+        await openPluggyWidget(data.connectToken, data.state);
+      } else {
+        throw new Error('Resposta inválida ao iniciar conexão bancária.');
       }
 
       await loadData(selectedMonth);
@@ -443,12 +485,16 @@ function App() {
         <p className="panel-help">Conexão com consentimento explícito: BB, Itaú, CEF, Santander, Nubank ou Bradesco.</p>
         <div className="bank-connect-row">
           <select value={bankInstitution} onChange={(e) => setBankInstitution(e.target.value)}>
-            <option value="BB">Banco do Brasil</option>
-            <option value="ITAU">Itaú</option>
-            <option value="CEF">Caixa (CEF)</option>
-            <option value="SANTANDER">Santander</option>
-            <option value="NUBANK">Nubank</option>
-            <option value="BRADESCO">Bradesco</option>
+            {(bankInstitutions.length ? bankInstitutions : [
+              { key: 'BB', name: 'Banco do Brasil' },
+              { key: 'ITAU', name: 'Itaú' },
+              { key: 'CEF', name: 'Caixa (CEF)' },
+              { key: 'SANTANDER', name: 'Santander' },
+              { key: 'NUBANK', name: 'Nubank' },
+              { key: 'BRADESCO', name: 'Bradesco' }
+            ]).map((institution) => (
+              <option key={institution.key} value={institution.key}>{institution.name}</option>
+            ))}
           </select>
           <button type="button" onClick={handleConnectBank} disabled={connectingBank}>
             {connectingBank ? 'Conectando...' : 'Conectar Banco'}
@@ -469,7 +515,7 @@ function App() {
               {bankConnections.map((conn) => (
                 <tr key={conn.id}>
                   <td>{conn.institution}</td>
-                  <td>{conn.status}</td>
+                  <td>{String(conn.status || "-").toUpperCase()}</td>
                   <td>{conn.consent?.scopes?.join(', ') || '-'}</td>
                   <td>
                     <div className="table-actions">

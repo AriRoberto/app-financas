@@ -144,3 +144,29 @@ test('retorna plano de recuperação financeira com ações por prazo', async ()
     assert.ok(data.nextBestAction?.title);
   });
 });
+
+
+test('lista instituições bancárias do app para conexão', async () => {
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/banks/institutions`);
+    assert.equal(response.status, 200);
+    const data = await response.json();
+    assert.ok(Array.isArray(data.institutions));
+    assert.ok(data.institutions.some((item) => item.key === 'BB'));
+    assert.ok(data.institutions.some((item) => item.key === 'ITAU'));
+  });
+});
+
+test('connect aceita institution_key para instituições do app', async () => {
+  await withServer(async (baseUrl) => {
+    __resetOpenFinanceStore();
+    const response = await fetch(`${baseUrl}/api/banks/connect`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ institution_key: 'SANTANDER', scopes: ['accounts', 'transactions'] })
+    });
+    assert.equal(response.status, 200);
+    const data = await response.json();
+    assert.ok(data.status === 'PENDING' || data.status === 'UNSUPPORTED');
+  });
+});

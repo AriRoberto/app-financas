@@ -51,3 +51,11 @@ Abra: `http://localhost:5173`
 cd backend
 npm test
 ```
+
+
+## Pluggy real (sem mock)
+1. Defina `OPEN_FINANCE_MOCK=false` no `.env`.
+2. Configure `AISP_CLIENT_ID` e `AISP_CLIENT_SECRET` do My Pluggy.
+3. Mantenha `AISP_REDIRECT_URI` apontando para callback do backend (HTTPS em produção).
+4. No frontend, o botão **Conectar Banco** abre o Pluggy Connect usando `connectToken`.
+5. Se um banco não tiver conector no Pluggy, status será `UNSUPPORTED` (sem quebrar a tela).

@@ -20,8 +20,8 @@ export function addAudit(event, meta = {}) {
   db.audit_logs.push({ id: nextId('audit'), event, meta, created_at: nowIso() });
 }
 
-export function createConnection({ user_id, institution, status }) {
-  const item = { id: nextId('conn'), user_id, institution, status, created_at: nowIso(), updated_at: nowIso() };
+export function createConnection({ user_id, institution, institution_key, status, provider = 'mock', member = 'family', connector_id = null }) {
+  const item = { id: nextId('conn'), user_id, institution, institution_key: institution_key || institution, status, provider, member, connector_id, item_id: null, created_at: nowIso(), updated_at: nowIso() };
   db.bank_connections.push(item);
   return item;
 }

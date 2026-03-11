@@ -1,7 +1,7 @@
 import cors from 'cors';
 import express from 'express';
 import { AispClient } from './openfinance/aisp-client.js';
-import { getEnvConfig, ALLOWED_INSTITUTIONS, DEFAULT_SCOPES } from './openfinance/config.js';
+import { getEnvConfig, ALLOWED_INSTITUTIONS, DEFAULT_SCOPES, APP_SUPPORTED_INSTITUTIONS } from './openfinance/config.js';
 import { decryptToken, encryptToken, randomState } from './openfinance/security.js';
 import {
   __resetOpenFinanceStore,
@@ -23,6 +23,7 @@ import {
 } from './openfinance/store.js';
 import { registerMockAispRoutes } from './openfinance/mock-aisp.js';
 import { startPeriodicSync, syncByConnectionId } from './openfinance/sync-service.js';
+import { getInstitutionByKey } from './openfinance/institutions.js';
 
 const app = express();
 const PORT = process.env.PORT || 3333;
@@ -713,6 +714,10 @@ app.get('/reports/expenses-by-category', (req, res) => {
   res.json({ member: normalizeMemberId(member), from, to, totalExpenses, categories: rows });
 });
 
+app.get('/api/banks/institutions', (_req, res) => {
+  res.json({ institutions: APP_SUPPORTED_INSTITUTIONS });
+});
+
 function ensureSyncRateLimit(connectionId) {
   const now = Date.now();
   const key = `${connectionId}`;
@@ -725,56 +730,117 @@ function ensureSyncRateLimit(connectionId) {
 app.post('/api/banks/connect', async (req, res) => {
   try {
     const user_id = 'demo-user';
-    const institution = req.body.institution;
+    const member = normalizeMemberId(req.body.member || 'family');
+    const institution_key = req.body.institution_key || req.body.institution;
     const scopes = req.body.scopes?.length ? req.body.scopes : DEFAULT_SCOPES;
     const days = Number(req.body.days || ofConfig.syncDefaultDays);
 
-    if (!ALLOWED_INSTITUTIONS.includes(institution)) {
-      return res.status(400).json({ message: 'Instituição inválida. Use BB, ITAU, CEF, SANTANDER, NUBANK ou BRADESCO.' });
+    if (!ALLOWED_INSTITUTIONS.includes(institution_key)) {
+      return res.status(400).json({ message: 'Instituição inválida para conexão.' });
+    }
+
+    const institution = getInstitutionByKey(institution_key);
+    const connectorResolution = await aispClient.resolve_institution(institution);
+
+    const connection = createConnection({
+      user_id,
+      member,
+      institution: institution.name,
+      institution_key,
+      status: connectorResolution.status === 'SUPPORTED' ? 'pending' : 'unsupported',
+      provider: ofConfig.openFinanceMock ? 'mock' : 'pluggy',
+      connector_id: connectorResolution.connectorId
+    });
+
+    if (connectorResolution.status !== 'SUPPORTED') {
+      addAudit('institution_unsupported', { connection_id: connection.id, institution_key });
+      return res.json({
+        status: 'UNSUPPORTED',
+        connectionId: connection.id,
+        message: `Instituição ${institution.name} ainda não está suportada pelo provedor Pluggy.`
+      });
     }
 
     const toDate = new Date().toISOString().slice(0, 10);
     const fromDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-
-    const connection = createConnection({ user_id, institution, status: 'pending' });
     const state = randomState();
-    saveState(state, { connection_id: connection.id, user_id, institution, scopes, fromDate, toDate });
+    saveState(state, { connection_id: connection.id, user_id, institution_key, scopes, fromDate, toDate });
 
-    const consent = await aispClient.create_consent({ user_id, institution, scopes, from_date: fromDate, to_date: toDate, state });
-    addAudit('consent_created', { connection_id: connection.id, institution, scopes_count: scopes.length });
+    const consent = await aispClient.create_consent({
+      user_id,
+      institution,
+      scopes,
+      from_date: fromDate,
+      to_date: toDate,
+      state,
+      connectorId: connectorResolution.connectorId
+    });
 
-    return res.json({ redirectUrl: consent.redirect_url });
-  } catch (err) {
+    addAudit('consent_created', { connection_id: connection.id, institution_key, scopes_count: scopes.length });
+
+    if (ofConfig.openFinanceMock) {
+      return res.json({ status: 'PENDING', connectionId: connection.id, redirectUrl: consent.redirect_url });
+    }
+
+    return res.json({
+      status: 'PENDING',
+      connectionId: connection.id,
+      state,
+      connectToken: consent.connect_token,
+      connectWidgetUrl: 'https://connect.pluggy.ai'
+    });
+  } catch {
     return res.status(500).json({ message: 'Erro ao iniciar conexão bancária.' });
   }
 });
 
 app.get('/api/banks/callback', async (req, res) => {
   try {
-    const { code, state } = req.query;
+    const { code, state, itemId } = req.query;
     const pending = consumeState(state);
     if (!pending) {
       return res.status(400).json({ message: 'state inválido ou expirado.' });
     }
 
-    const tokenPayload = await aispClient.exchange_code_for_token(code);
-    const consent = createConsent({
-      connection_id: pending.connection_id,
-      consent_id_externo: tokenPayload.consent_ref,
-      scopes: pending.scopes,
-      granted_at: new Date().toISOString(),
-      expires_at: tokenPayload.expires_at,
-      status: 'active'
-    });
+    let externalConsentRef = itemId;
+    let expiresAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
 
-    upsertToken({
-      consent_id: consent.id,
-      access_token_enc: encryptToken(tokenPayload.access_token, ofConfig.tokenEncryptionKey),
-      refresh_token_enc: encryptToken(tokenPayload.refresh_token, ofConfig.tokenEncryptionKey),
-      token_expires_at: tokenPayload.expires_at
-    });
+    if (ofConfig.openFinanceMock) {
+      const tokenPayload = await aispClient.exchange_code_for_token(code);
+      externalConsentRef = tokenPayload.consent_ref;
+      expiresAt = tokenPayload.expires_at;
 
-    updateConnection(pending.connection_id, { status: 'active' });
+      const consent = createConsent({
+        connection_id: pending.connection_id,
+        consent_id_externo: externalConsentRef,
+        scopes: pending.scopes,
+        granted_at: new Date().toISOString(),
+        expires_at: expiresAt,
+        status: 'active'
+      });
+
+      upsertToken({
+        consent_id: consent.id,
+        access_token_enc: encryptToken(tokenPayload.access_token, ofConfig.tokenEncryptionKey),
+        refresh_token_enc: encryptToken(tokenPayload.refresh_token, ofConfig.tokenEncryptionKey),
+        token_expires_at: tokenPayload.expires_at
+      });
+    } else {
+      if (!externalConsentRef) {
+        return res.status(400).json({ message: 'itemId ausente para finalizar conexão.' });
+      }
+
+      createConsent({
+        connection_id: pending.connection_id,
+        consent_id_externo: externalConsentRef,
+        scopes: pending.scopes,
+        granted_at: new Date().toISOString(),
+        expires_at: expiresAt,
+        status: 'active'
+      });
+    }
+
+    updateConnection(pending.connection_id, { status: 'active', item_id: externalConsentRef });
     addAudit('callback_completed', { connection_id: pending.connection_id, scopes_count: pending.scopes.length });
 
     syncByConnectionId({
