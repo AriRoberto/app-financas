@@ -16,6 +16,8 @@ Projeto full-stack para controlar receitas e despesas familiares com foco em:
 - Conexão bancária com botão **Conectar Banco**, consentimento Open Finance, sincronização manual e revogação.
 - Instituições disponíveis no fluxo AISP: BB, ITAU, CEF, SANTANDER, NUBANK e BRADESCO.
 
+- Especificação funcional do módulo de recuperação financeira em `docs/ESPEC_RECUPERACAO_FINANCEIRA.md`.
+
 ## Open Finance (fluxo)
 1. `POST /api/banks/connect` inicia consentimento no AISP e retorna `redirectUrl`.
 2. Callback `GET /api/banks/callback?code&state` valida state/CSRF e troca code por token.
