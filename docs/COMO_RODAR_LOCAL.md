@@ -59,3 +59,29 @@ npm test
 3. Mantenha `AISP_REDIRECT_URI` apontando para callback do backend (HTTPS em produção).
 4. No frontend, o botão **Conectar Banco** abre o Pluggy Connect usando `connectToken`.
 5. Se um banco não tiver conector no Pluggy, status será `UNSUPPORTED` (sem quebrar a tela).
+
+
+## Configuração de ambiente (resumo rápido)
+Use `backend/.env` (não versionado) com base em `backend/.env.example`.
+
+### MOCK
+```env
+OPEN_FINANCE_MOCK=true
+AISP_BASE_URL=http://localhost:3333/mock-aisp
+AISP_CLIENT_ID=mock
+AISP_CLIENT_SECRET=mock
+AISP_REDIRECT_URI=http://localhost:3333/api/banks/callback
+TOKEN_ENCRYPTION_KEY=change-me-32bytes-minimum-secret-key
+SYNC_DEFAULT_DAYS=90
+```
+
+### REAL (Pluggy)
+```env
+OPEN_FINANCE_MOCK=false
+AISP_BASE_URL=https://api.pluggy.ai
+AISP_CLIENT_ID=SEU_CLIENT_ID_REAL
+AISP_CLIENT_SECRET=SEU_CLIENT_SECRET_REAL
+AISP_REDIRECT_URI=http://localhost:3333/api/banks/callback
+TOKEN_ENCRYPTION_KEY=uma-chave-forte-com-32-bytes-ou-mais
+SYNC_DEFAULT_DAYS=90
+```

@@ -99,3 +99,40 @@ Quando não encontrar conector equivalente, a conexão fica com status `UNSUPPOR
 - Se `/api/banks/:connectionId/sync` retornar `Conexão não autorizada`, finalize o Pluggy Connect até receber `itemId` no callback.
 - A conexão só fica `ACTIVE` após callback válido com `state` + `itemId`.
 - Endpoints de leitura (`/api/dashboard`, `/api/transactions`, etc.) usam `Cache-Control: no-store` para evitar respostas 304 desatualizadas no navegador.
+
+
+## Manual de configuração do `.env` (DEV e REAL)
+
+> Crie `backend/.env` com base em `backend/.env.example`.
+
+### 1) Modo MOCK (desenvolvimento local)
+```env
+OPEN_FINANCE_MOCK=true
+AISP_BASE_URL=http://localhost:3333/mock-aisp
+AISP_CLIENT_ID=mock
+AISP_CLIENT_SECRET=mock
+AISP_REDIRECT_URI=http://localhost:3333/api/banks/callback
+TOKEN_ENCRYPTION_KEY=change-me-32bytes-minimum-secret-key
+SYNC_DEFAULT_DAYS=90
+```
+
+### 2) Modo REAL (Pluggy / My Pluggy)
+```env
+OPEN_FINANCE_MOCK=false
+AISP_BASE_URL=https://api.pluggy.ai
+AISP_CLIENT_ID=SEU_CLIENT_ID_REAL
+AISP_CLIENT_SECRET=SEU_CLIENT_SECRET_REAL
+AISP_REDIRECT_URI=http://localhost:3333/api/banks/callback
+TOKEN_ENCRYPTION_KEY=uma-chave-forte-com-32-bytes-ou-mais
+SYNC_DEFAULT_DAYS=90
+```
+
+### Regras de segurança
+- `TOKEN_ENCRYPTION_KEY` deve ter no mínimo 32 bytes.
+- Nunca logar `clientSecret`, `apiKey`, `connectToken`, `accessToken`, `refreshToken` ou `code`.
+- Nunca versionar `.env` (garantido em `.gitignore`).
+
+### URLs reais usadas (Pluggy)
+- `POST https://api.pluggy.ai/auth`
+- `POST https://api.pluggy.ai/connect_token`
+- `GET https://api.pluggy.ai/connectors`
