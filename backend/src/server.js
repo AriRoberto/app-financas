@@ -34,6 +34,18 @@ const rateLimitSync = new Map();
 app.use(cors());
 app.use(express.json());
 
+app.disable('etag');
+
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api/')) {
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+    res.set('Surrogate-Control', 'no-store');
+  }
+  next();
+});
+
 if (ofConfig.openFinanceMock) {
   registerMockAispRoutes(app);
 }
@@ -887,8 +899,14 @@ app.post('/api/banks/:connectionId/sync', async (req, res) => {
     const toDate = req.body.to || now.toISOString().slice(0, 10);
     const fromDate = req.body.from || new Date(now.getTime() - ofConfig.syncDefaultDays * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
     const data = await syncByConnectionId({ connectionId, aispClient, fromDate, toDate });
-    return res.json({ ok: true, ...data });
+    return res.json(data);
   } catch (err) {
+    if (err?.message === 'connection_not_authorized') {
+      return res.status(400).json({ message: 'Conexão não autorizada: finalize o consentimento antes de sincronizar.' });
+    }
+    if (err?.message === 'connection_not_found') {
+      return res.status(404).json({ message: 'Conexão bancária não encontrada.' });
+    }
     return res.status(400).json({ message: 'Não foi possível sincronizar a conexão.' });
   }
 });

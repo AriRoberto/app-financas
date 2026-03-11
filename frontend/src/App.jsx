@@ -113,8 +113,13 @@ function App() {
     return expenseCategories;
   }, [form.type, incomeCategories, investmentCategories, expenseCategories]);
 
+
+  async function fetchNoStore(url, options = {}) {
+    return fetch(url, { cache: 'no-store', ...options });
+  }
+
   async function loadDescriptionTemplates(type, category) {
-    const response = await fetch(`${API_URL}/api/description-templates?type=${type}&category=${encodeURIComponent(category || '')}`);
+    const response = await fetchNoStore(`${API_URL}/api/description-templates?type=${type}&category=${encodeURIComponent(category || '')}&ts=${Date.now()}`);
     const data = await response.json();
     setDescriptionTemplates(data.templates || []);
   }
@@ -125,15 +130,16 @@ function App() {
       member: selectedMember,
       term: selectedTerm,
       from: fromDate,
-      to: toDate
+      to: toDate,
+      ts: Date.now().toString()
     }).toString();
   }
 
   async function loadStaticData() {
     const [membersRes, categoriesRes, institutionsRes] = await Promise.all([
-      fetch(`${API_URL}/api/members`),
-      fetch(`${API_URL}/api/categories`),
-      fetch(`${API_URL}/api/banks/institutions`)
+      fetchNoStore(`${API_URL}/api/members?ts=${Date.now()}`),
+      fetchNoStore(`${API_URL}/api/categories?ts=${Date.now()}`),
+      fetchNoStore(`${API_URL}/api/banks/institutions?ts=${Date.now()}`)
     ]);
 
     const membersData = await membersRes.json();
@@ -154,13 +160,13 @@ function App() {
   async function loadData(month = selectedMonth) {
     const params = queryParams(month);
     const [dashboardRes, suggestionsRes, transactionsRes, monthsRes, investmentsRes, bankConnectionsRes, recoveryPlanRes] = await Promise.all([
-      fetch(`${API_URL}/api/dashboard?${params}`),
-      fetch(`${API_URL}/api/suggestions?${params}`),
-      fetch(`${API_URL}/api/transactions?${params}`),
-      fetch(`${API_URL}/api/months?member=${selectedMember}`),
-      fetch(`${API_URL}/api/investments?member=${selectedMember}&from=${fromDate}&to=${toDate}`),
-      fetch(`${API_URL}/api/banks/connections`),
-      fetch(`${API_URL}/api/recovery/plan?${params}`)
+      fetchNoStore(`${API_URL}/api/dashboard?${params}`),
+      fetchNoStore(`${API_URL}/api/suggestions?${params}`),
+      fetchNoStore(`${API_URL}/api/transactions?${params}`),
+      fetchNoStore(`${API_URL}/api/months?member=${selectedMember}&ts=${Date.now()}`),
+      fetchNoStore(`${API_URL}/api/investments?member=${selectedMember}&from=${fromDate}&to=${toDate}&ts=${Date.now()}`),
+      fetchNoStore(`${API_URL}/api/banks/connections?ts=${Date.now()}`),
+      fetchNoStore(`${API_URL}/api/recovery/plan?${params}`)
     ]);
 
     const dashboardData = await dashboardRes.json();
@@ -264,7 +270,7 @@ function App() {
         onSuccess: async (itemData) => {
           try {
             const itemId = itemData?.itemId || itemData?.item?.id;
-            const callbackRes = await fetch(`${API_URL}/api/banks/callback?state=${encodeURIComponent(state)}&itemId=${encodeURIComponent(itemId || '')}`);
+            const callbackRes = await fetchNoStore(`${API_URL}/api/banks/callback?state=${encodeURIComponent(state)}&itemId=${encodeURIComponent(itemId || '')}`);
             if (!callbackRes.ok) throw new Error('Falha ao concluir callback com item Pluggy.');
             resolve();
           } catch (err) {
@@ -282,7 +288,7 @@ function App() {
     setConnectingBank(true);
     setError('');
     try {
-      const response = await fetch(`${API_URL}/api/banks/connect`, {
+      const response = await fetchNoStore(`${API_URL}/api/banks/connect`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ institution_key: bankInstitution, scopes: ['accounts', 'transactions'] })
@@ -296,7 +302,7 @@ function App() {
       }
 
       if (data.redirectUrl) {
-        const callbackResponse = await fetch(data.redirectUrl);
+        const callbackResponse = await fetchNoStore(data.redirectUrl);
         if (!callbackResponse.ok) {
           throw new Error('Falha ao concluir consentimento da conexão bancária.');
         }
@@ -316,7 +322,7 @@ function App() {
 
   async function handleRevokeConnection(connectionId) {
     try {
-      const response = await fetch(`${API_URL}/api/banks/${connectionId}/revoke`, { method: 'POST' });
+      const response = await fetchNoStore(`${API_URL}/api/banks/${connectionId}/revoke`, { method: 'POST' });
       if (!response.ok) throw new Error('Falha ao revogar conexão.');
       await loadData(selectedMonth);
     } catch (err) {
@@ -326,7 +332,7 @@ function App() {
 
   async function handleSyncConnection(connectionId) {
     try {
-      const response = await fetch(`${API_URL}/api/banks/${connectionId}/sync`, { method: 'POST' });
+      const response = await fetchNoStore(`${API_URL}/api/banks/${connectionId}/sync`, { method: 'POST' });
       if (!response.ok) throw new Error('Falha ao sincronizar conexão.');
       await loadData(selectedMonth);
     } catch (err) {
@@ -345,7 +351,7 @@ function App() {
         amount: Number(form.amount),
         isInvestmentReserve: form.type === 'expense' && (form.isInvestmentReserve || form.category === 'Reserva para investir')
       };
-      const response = await fetch(`${API_URL}/api/transactions`, {
+      const response = await fetchNoStore(`${API_URL}/api/transactions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -374,7 +380,7 @@ function App() {
     setError('');
 
     try {
-      const response = await fetch(`${API_URL}/api/transactions`, { method: 'DELETE' });
+      const response = await fetchNoStore(`${API_URL}/api/transactions`, { method: 'DELETE' });
       if (!response.ok) {
         throw new Error('Não foi possível limpar os dados de teste.');
       }
@@ -389,7 +395,7 @@ function App() {
   async function handleRestoreDemoData() {
     setError('');
     try {
-      const response = await fetch(`${API_URL}/api/transactions/seed`, { method: 'POST' });
+      const response = await fetchNoStore(`${API_URL}/api/transactions/seed`, { method: 'POST' });
       if (!response.ok) {
         throw new Error('Não foi possível restaurar os dados de exemplo.');
       }

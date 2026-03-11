@@ -49,12 +49,18 @@ export async function syncConnection({ aispClient, connection, consent, fromDate
   }
 
   addAudit('sync_finished', { connection_id: connection.id, inserted });
-  return { accounts: accounts.length, inserted };
+  return {
+    accountsImported: accounts.length,
+    transactionsImported: inserted,
+    from: fromDate,
+    to: toDate
+  };
 }
 
 export async function syncByConnectionId({ connectionId, aispClient, fromDate, toDate }) {
   const connection = getConnection(connectionId);
   if (!connection) throw new Error('connection_not_found');
+  if (!connection.item_id) throw new Error('connection_not_authorized');
   const consent = getConsentByConnection(connectionId);
   if (!consent || consent.status !== 'active') throw new Error('consent_inactive');
   return syncConnection({ aispClient, connection, consent, fromDate, toDate });
