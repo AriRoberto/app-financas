@@ -1,11 +1,41 @@
 import cors from 'cors';
 import express from 'express';
+import { AispClient } from './openfinance/aisp-client.js';
+import { getEnvConfig, ALLOWED_INSTITUTIONS, DEFAULT_SCOPES } from './openfinance/config.js';
+import { decryptToken, encryptToken, randomState } from './openfinance/security.js';
+import {
+  __resetOpenFinanceStore,
+  addAudit,
+  consumeState,
+  createConnection,
+  createConsent,
+  deleteTokensByConsent,
+  getConsentByConnection,
+  listAccounts,
+  listConnections,
+  listTransactionsByAccount,
+  purgeExpiredTokens,
+  purgeOldAuditLogs,
+  revokeConsent,
+  saveState,
+  updateConnection,
+  upsertToken
+} from './openfinance/store.js';
+import { registerMockAispRoutes } from './openfinance/mock-aisp.js';
+import { startPeriodicSync, syncByConnectionId } from './openfinance/sync-service.js';
 
 const app = express();
 const PORT = process.env.PORT || 3333;
+const ofConfig = getEnvConfig();
+const aispClient = new AispClient(ofConfig);
+const rateLimitSync = new Map();
 
 app.use(cors());
 app.use(express.json());
+
+if (ofConfig.openFinanceMock) {
+  registerMockAispRoutes(app);
+}
 
 const members = [
   { id: 'husband', name: 'marido', createdAt: '2026-01-01T00:00:00.000Z' },
@@ -484,9 +514,167 @@ app.get('/reports/expenses-by-category', (req, res) => {
   res.json({ member: normalizeMemberId(member), from, to, totalExpenses, categories: rows });
 });
 
-export { app, buildDashboard, filterTransactions, seedInvestmentsFromTransactions, upsertInvestmentFromReserve };
+function ensureSyncRateLimit(connectionId) {
+  const now = Date.now();
+  const key = `${connectionId}`;
+  const last = rateLimitSync.get(key) || 0;
+  if (now - last < 5_000) return false;
+  rateLimitSync.set(key, now);
+  return true;
+}
+
+app.post('/api/banks/connect', async (req, res) => {
+  try {
+    const user_id = 'demo-user';
+    const institution = req.body.institution;
+    const scopes = req.body.scopes?.length ? req.body.scopes : DEFAULT_SCOPES;
+    const days = Number(req.body.days || ofConfig.syncDefaultDays);
+
+    if (!ALLOWED_INSTITUTIONS.includes(institution)) {
+      return res.status(400).json({ message: 'Instituição inválida. Use BB ou ITAU.' });
+    }
+
+    const toDate = new Date().toISOString().slice(0, 10);
+    const fromDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+    const connection = createConnection({ user_id, institution, status: 'pending' });
+    const state = randomState();
+    saveState(state, { connection_id: connection.id, user_id, institution, scopes, fromDate, toDate });
+
+    const consent = await aispClient.create_consent({ user_id, institution, scopes, from_date: fromDate, to_date: toDate, state });
+    addAudit('consent_created', { connection_id: connection.id, institution, scopes_count: scopes.length });
+
+    return res.json({ redirectUrl: consent.redirect_url });
+  } catch (err) {
+    return res.status(500).json({ message: 'Erro ao iniciar conexão bancária.' });
+  }
+});
+
+app.get('/api/banks/callback', async (req, res) => {
+  try {
+    const { code, state } = req.query;
+    const pending = consumeState(state);
+    if (!pending) {
+      return res.status(400).json({ message: 'state inválido ou expirado.' });
+    }
+
+    const tokenPayload = await aispClient.exchange_code_for_token(code);
+    const consent = createConsent({
+      connection_id: pending.connection_id,
+      consent_id_externo: tokenPayload.consent_ref,
+      scopes: pending.scopes,
+      granted_at: new Date().toISOString(),
+      expires_at: tokenPayload.expires_at,
+      status: 'active'
+    });
+
+    upsertToken({
+      consent_id: consent.id,
+      access_token_enc: encryptToken(tokenPayload.access_token, ofConfig.tokenEncryptionKey),
+      refresh_token_enc: encryptToken(tokenPayload.refresh_token, ofConfig.tokenEncryptionKey),
+      token_expires_at: tokenPayload.expires_at
+    });
+
+    updateConnection(pending.connection_id, { status: 'active' });
+    addAudit('callback_completed', { connection_id: pending.connection_id, scopes_count: pending.scopes.length });
+
+    syncByConnectionId({
+      connectionId: pending.connection_id,
+      aispClient,
+      fromDate: pending.fromDate,
+      toDate: pending.toDate
+    }).catch(() => {});
+
+    return res.json({ connected: true, connectionId: pending.connection_id });
+  } catch {
+    return res.status(500).json({ message: 'Erro ao concluir callback de consentimento.' });
+  }
+});
+
+app.get('/api/banks/connections', (_req, res) => {
+  const user_id = 'demo-user';
+  const rows = listConnections(user_id).map((connection) => {
+    const consent = getConsentByConnection(connection.id);
+    return {
+      ...connection,
+      consent: consent
+        ? {
+          status: consent.status,
+          scopes: consent.scopes,
+          granted_at: consent.granted_at,
+          expires_at: consent.expires_at,
+          revoked_at: consent.revoked_at
+        }
+        : null
+    };
+  });
+  res.json({ connections: rows });
+});
+
+app.post('/api/banks/:connectionId/sync', async (req, res) => {
+  const { connectionId } = req.params;
+  if (!ensureSyncRateLimit(connectionId)) {
+    return res.status(429).json({ message: 'Muitas sincronizações em sequência. Aguarde alguns segundos.' });
+  }
+
+  try {
+    const now = new Date();
+    const toDate = req.body.to || now.toISOString().slice(0, 10);
+    const fromDate = req.body.from || new Date(now.getTime() - ofConfig.syncDefaultDays * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const data = await syncByConnectionId({ connectionId, aispClient, fromDate, toDate });
+    return res.json({ ok: true, ...data });
+  } catch (err) {
+    return res.status(400).json({ message: 'Não foi possível sincronizar a conexão.' });
+  }
+});
+
+app.post('/api/banks/:connectionId/revoke', async (req, res) => {
+  const { connectionId } = req.params;
+  const consent = getConsentByConnection(connectionId);
+  if (!consent) return res.status(404).json({ message: 'Consentimento não encontrado.' });
+
+  try {
+    await aispClient.revoke_consent(consent.consent_id_externo);
+  } catch {
+    // best-effort revoke
+  }
+
+  revokeConsent(consent.id);
+  deleteTokensByConsent(consent.id);
+  updateConnection(connectionId, { status: 'revoked' });
+  addAudit('consent_revoked', { connection_id: connectionId });
+  return res.json({ revoked: true });
+});
+
+app.get('/api/banks/accounts', (_req, res) => {
+  const rows = listAccounts('demo-user');
+  res.json({ accounts: rows });
+});
+
+app.get('/api/banks/accounts/:id/transactions', (req, res) => {
+  const rows = listTransactionsByAccount(req.params.id, req.query.from, req.query.to);
+  res.json({ transactions: rows });
+});
+
+app.post('/api/banks/maintenance/purge', (_req, res) => {
+  const deletedTokens = purgeExpiredTokens();
+  const deletedLogs = purgeOldAuditLogs();
+  res.json({ deletedTokens, deletedLogs });
+});
+
+export {
+  app,
+  buildDashboard,
+  filterTransactions,
+  seedInvestmentsFromTransactions,
+  upsertInvestmentFromReserve,
+  encryptToken,
+  decryptToken,
+  __resetOpenFinanceStore
+};
 
 if (process.env.NODE_ENV !== 'test') {
+  startPeriodicSync({ intervalMs: 5 * 60 * 1000, aispClient });
   app.listen(PORT, () => {
     console.log(`API running on http://localhost:${PORT}`);
   });

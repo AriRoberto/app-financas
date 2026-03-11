@@ -93,6 +93,9 @@ function App() {
   const [saving, setSaving] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [error, setError] = useState('');
+  const [connectingBank, setConnectingBank] = useState(false);
+  const [bankInstitution, setBankInstitution] = useState('BB');
+  const [bankConnections, setBankConnections] = useState([]);
 
   const currentCategories = useMemo(() => {
     if (form.type === 'income') return incomeCategories;
@@ -137,12 +140,13 @@ function App() {
 
   async function loadData(month = selectedMonth) {
     const params = queryParams(month);
-    const [dashboardRes, suggestionsRes, transactionsRes, monthsRes, investmentsRes] = await Promise.all([
+    const [dashboardRes, suggestionsRes, transactionsRes, monthsRes, investmentsRes, bankConnectionsRes] = await Promise.all([
       fetch(`${API_URL}/api/dashboard?${params}`),
       fetch(`${API_URL}/api/suggestions?${params}`),
       fetch(`${API_URL}/api/transactions?${params}`),
       fetch(`${API_URL}/api/months?member=${selectedMember}`),
-      fetch(`${API_URL}/api/investments?member=${selectedMember}&from=${fromDate}&to=${toDate}`)
+      fetch(`${API_URL}/api/investments?member=${selectedMember}&from=${fromDate}&to=${toDate}`),
+      fetch(`${API_URL}/api/banks/connections`)
     ]);
 
     const dashboardData = await dashboardRes.json();
@@ -150,12 +154,14 @@ function App() {
     const transactionsData = await transactionsRes.json();
     const monthsData = await monthsRes.json();
     const investmentsJson = await investmentsRes.json();
+    const connectionsJson = await bankConnectionsRes.json();
 
     setDashboard(dashboardData);
     setSuggestions(suggestionsData.suggestions || []);
     setTransactions(transactionsData.transactions || []);
     setMonths(monthsData.months || []);
     setInvestments(investmentsJson);
+    setBankConnections(connectionsJson.connections || []);
   }
 
   async function boot() {
@@ -227,6 +233,52 @@ function App() {
     const exists = allCategoryRows.some((item) => item.key === selectedCategoryKey);
     if (!exists) setSelectedCategoryKey(allCategoryRows[0].key);
   }, [allCategoryRows, selectedCategoryKey]);
+
+
+  async function handleConnectBank() {
+    setConnectingBank(true);
+    setError('');
+    try {
+      const response = await fetch(`${API_URL}/api/banks/connect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ institution: bankInstitution, scopes: ['accounts', 'transactions'] })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Não foi possível conectar o banco.');
+
+      const callbackResponse = await fetch(data.redirectUrl);
+      if (!callbackResponse.ok) {
+        throw new Error('Falha ao concluir consentimento da conexão bancária.');
+      }
+
+      await loadData(selectedMonth);
+    } catch (err) {
+      setError(err.message || 'Erro ao conectar banco.');
+    } finally {
+      setConnectingBank(false);
+    }
+  }
+
+  async function handleRevokeConnection(connectionId) {
+    try {
+      const response = await fetch(`${API_URL}/api/banks/${connectionId}/revoke`, { method: 'POST' });
+      if (!response.ok) throw new Error('Falha ao revogar conexão.');
+      await loadData(selectedMonth);
+    } catch (err) {
+      setError(err.message || 'Erro ao revogar conexão.');
+    }
+  }
+
+  async function handleSyncConnection(connectionId) {
+    try {
+      const response = await fetch(`${API_URL}/api/banks/${connectionId}/sync`, { method: 'POST' });
+      if (!response.ok) throw new Error('Falha ao sincronizar conexão.');
+      await loadData(selectedMonth);
+    } catch (err) {
+      setError(err.message || 'Erro ao sincronizar conexão.');
+    }
+  }
 
   async function submitTransaction(event) {
     event.preventDefault();
@@ -364,6 +416,52 @@ function App() {
       </section>
 
       {error ? <p className="error">{error}</p> : null}
+
+      <section className="panel bank-panel">
+        <h2>Conectar banco (Open Finance / AISP)</h2>
+        <p className="panel-help">Conexão com consentimento explícito: Banco do Brasil ou Itaú.</p>
+        <div className="bank-connect-row">
+          <select value={bankInstitution} onChange={(e) => setBankInstitution(e.target.value)}>
+            <option value="BB">Banco do Brasil</option>
+            <option value="ITAU">Itaú</option>
+          </select>
+          <button type="button" onClick={handleConnectBank} disabled={connectingBank}>
+            {connectingBank ? 'Conectando...' : 'Conectar Banco'}
+          </button>
+        </div>
+
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Instituição</th>
+                <th>Status</th>
+                <th>Escopos</th>
+                <th>Ações</th>
+              </tr>
+            </thead>
+            <tbody>
+              {bankConnections.map((conn) => (
+                <tr key={conn.id}>
+                  <td>{conn.institution}</td>
+                  <td>{conn.status}</td>
+                  <td>{conn.consent?.scopes?.join(', ') || '-'}</td>
+                  <td>
+                    <div className="table-actions">
+                      <button type="button" className="ghost" onClick={() => handleSyncConnection(conn.id)}>Sincronizar</button>
+                      <button type="button" className="ghost danger" onClick={() => handleRevokeConnection(conn.id)}>Revogar</button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {!bankConnections.length ? (
+                <tr><td colSpan="4">Sem conexões bancárias.</td></tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
 
       <section className="cards">
         <article className="card"><p>Receita total</p><strong>{currency.format(dashboard?.income || 0)}</strong></article>

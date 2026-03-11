@@ -361,3 +361,25 @@ td {
     grid-template-columns: 1fr;
   }
 }
+
+
+.bank-panel {
+  margin-bottom: 12px;
+}
+
+.bank-connect-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.table-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.table-actions button {
+  grid-column: auto;
+}
