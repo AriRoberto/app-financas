@@ -7,6 +7,7 @@ import {
   decryptToken,
   encryptToken
 } from './server.js';
+import { createConnection, createConsent, updateConnection, __resetOpenFinanceStore as __resetStoreInternal } from './openfinance/store.js';
 
 async function withServer(run) {
   const server = app.listen(0);
@@ -168,5 +169,63 @@ test('connect aceita institution_key para instituições do app', async () => {
     assert.equal(response.status, 200);
     const data = await response.json();
     assert.ok(data.status === 'PENDING' || data.status === 'UNSUPPORTED');
+  });
+});
+
+
+test('sync bloqueia conexão ACTIVE sem itemId (não autorizada)', async () => {
+  await withServer(async (baseUrl) => {
+    __resetOpenFinanceStore();
+    __resetStoreInternal();
+
+    const conn = createConnection({
+      user_id: 'demo-user',
+      institution: 'Banco do Brasil',
+      institution_key: 'BB',
+      status: 'active',
+      provider: 'pluggy',
+      connector_id: 'pluggy-bb'
+    });
+
+    createConsent({
+      connection_id: conn.id,
+      consent_id_externo: 'item-123',
+      scopes: ['accounts', 'transactions'],
+      granted_at: new Date().toISOString(),
+      expires_at: new Date(Date.now() + 3600_000).toISOString(),
+      status: 'active'
+    });
+
+    updateConnection(conn.id, { status: 'active', item_id: null });
+
+    const response = await fetch(`${baseUrl}/api/banks/${conn.id}/sync`, { method: 'POST' });
+    assert.equal(response.status, 400);
+    const data = await response.json();
+    assert.match(data.message, /Conexão não autorizada/i);
+  });
+});
+
+test('sync retorna resumo com contagem importada', async () => {
+  await withServer(async (baseUrl) => {
+    __resetOpenFinanceStore();
+
+    const connect = await fetch(`${baseUrl}/api/banks/connect`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ institution_key: 'BB', scopes: ['accounts', 'transactions'] })
+    });
+    const connectData = await connect.json();
+    const callbackRes = await fetch(connectData.redirectUrl);
+    const callbackData = await callbackRes.json();
+
+    await new Promise((r) => setTimeout(r, 5500));
+    const syncRes = await fetch(`${baseUrl}/api/banks/${callbackData.connectionId}/sync`, { method: 'POST' });
+    assert.equal(syncRes.status, 200);
+    const syncData = await syncRes.json();
+
+    assert.ok(typeof syncData.accountsImported === 'number');
+    assert.ok(typeof syncData.transactionsImported === 'number');
+    assert.ok(syncData.from);
+    assert.ok(syncData.to);
   });
 });

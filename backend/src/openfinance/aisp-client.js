@@ -39,7 +39,7 @@ export class AispClient {
 
   async resolve_institution(institution) {
     if (this.config.openFinanceMock) {
-      return { status: 'SUPPORTED', connectorId: institution, connectorName: institution };
+      return { status: 'SUPPORTED', connectorId: institution?.key || 'mock-connector', connectorName: institution?.name || 'Mock' };
     }
     return resolveConnectorForInstitution({ config: this.config, institution });
   }

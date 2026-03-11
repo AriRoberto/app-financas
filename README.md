@@ -93,3 +93,9 @@ Source of truth do app:
 
 O backend tenta resolver automaticamente `institution_key -> connectorId` no Pluggy com heurística por nome/tags e cache local.
 Quando não encontrar conector equivalente, a conexão fica com status `UNSUPPORTED`, sem quebrar UI.
+
+
+### Troubleshooting conexão real
+- Se `/api/banks/:connectionId/sync` retornar `Conexão não autorizada`, finalize o Pluggy Connect até receber `itemId` no callback.
+- A conexão só fica `ACTIVE` após callback válido com `state` + `itemId`.
+- Endpoints de leitura (`/api/dashboard`, `/api/transactions`, etc.) usam `Cache-Control: no-store` para evitar respostas 304 desatualizadas no navegador.
