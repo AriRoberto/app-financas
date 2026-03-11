@@ -11,5 +11,5 @@ export function getEnvConfig() {
   };
 }
 
-export const ALLOWED_INSTITUTIONS = ['BB', 'ITAU'];
+export const ALLOWED_INSTITUTIONS = ['BB', 'ITAU', 'CEF', 'SANTANDER', 'NUBANK', 'BRADESCO'];
 export const DEFAULT_SCOPES = ['accounts', 'transactions'];

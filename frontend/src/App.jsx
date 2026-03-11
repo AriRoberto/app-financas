@@ -419,11 +419,15 @@ function App() {
 
       <section className="panel bank-panel">
         <h2>Conectar banco (Open Finance / AISP)</h2>
-        <p className="panel-help">Conexão com consentimento explícito: Banco do Brasil ou Itaú.</p>
+        <p className="panel-help">Conexão com consentimento explícito: BB, Itaú, CEF, Santander, Nubank ou Bradesco.</p>
         <div className="bank-connect-row">
           <select value={bankInstitution} onChange={(e) => setBankInstitution(e.target.value)}>
             <option value="BB">Banco do Brasil</option>
             <option value="ITAU">Itaú</option>
+            <option value="CEF">Caixa (CEF)</option>
+            <option value="SANTANDER">Santander</option>
+            <option value="NUBANK">Nubank</option>
+            <option value="BRADESCO">Bradesco</option>
           </select>
           <button type="button" onClick={handleConnectBank} disabled={connectingBank}>
             {connectingBank ? 'Conectando...' : 'Conectar Banco'}

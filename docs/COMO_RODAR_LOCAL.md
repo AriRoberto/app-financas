@@ -31,7 +31,7 @@ npm run dev
 Abra: `http://localhost:5173`
 
 ## Open Finance (mock local)
-1. Na tela, escolha Banco do Brasil ou Itaú.
+1. Na tela, escolha Banco do Brasil, Itaú, Caixa (CEF), Santander, Nubank ou Bradesco.
 2. Clique em **Conectar Banco**.
 3. O app faz consentimento + callback + sync inicial automaticamente via mock AISP.
 4. Use **Sincronizar** para sync manual e **Revogar** para encerrar consentimento e limpar tokens.

@@ -112,3 +112,19 @@ test('integração mock AISP: connect -> callback -> sync -> list transactions',
     assert.ok(txData.transactions.length > 0);
   });
 });
+
+
+test('aceita conexão com banco BRADESCO', async () => {
+  await withServer(async (baseUrl) => {
+    __resetOpenFinanceStore();
+    const response = await fetch(`${baseUrl}/api/banks/connect`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ institution: 'BRADESCO', scopes: ['accounts', 'transactions'] })
+    });
+
+    assert.equal(response.status, 200);
+    const data = await response.json();
+    assert.ok(data.redirectUrl.includes('/api/banks/callback?code='));
+  });
+});

@@ -531,7 +531,7 @@ app.post('/api/banks/connect', async (req, res) => {
     const days = Number(req.body.days || ofConfig.syncDefaultDays);
 
     if (!ALLOWED_INSTITUTIONS.includes(institution)) {
-      return res.status(400).json({ message: 'Instituição inválida. Use BB ou ITAU.' });
+      return res.status(400).json({ message: 'Instituição inválida. Use BB, ITAU, CEF, SANTANDER, NUBANK ou BRADESCO.' });
     }
 
     const toDate = new Date().toISOString().slice(0, 10);

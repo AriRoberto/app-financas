@@ -14,6 +14,7 @@ Projeto full-stack para controlar receitas e despesas familiares com foco em:
 - Botões no formulário para **Limpar dados de teste** e **Trazer dados de teste** rapidamente.
 - Quadro de categorias + gráfico de pizza por categoria selecionada (despesas, receitas e investimentos).
 - Conexão bancária com botão **Conectar Banco**, consentimento Open Finance, sincronização manual e revogação.
+- Instituições disponíveis no fluxo AISP: BB, ITAU, CEF, SANTANDER, NUBANK e BRADESCO.
 
 ## Open Finance (fluxo)
 1. `POST /api/banks/connect` inicia consentimento no AISP e retorna `redirectUrl`.
