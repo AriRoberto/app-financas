@@ -279,6 +279,84 @@ td {
   margin-bottom: 12px;
 }
 
+
+.toast-stack {
+  position: sticky;
+  top: 12px;
+  z-index: 20;
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.toast {
+  border-radius: 10px;
+  padding: 10px 12px;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
+  border: 1px solid #dbe4f0;
+  background: #fff;
+}
+
+.toast.success {
+  border-color: #abefc6;
+  background: #ecfdf3;
+  color: #067647;
+}
+
+.toast.error {
+  border-color: #fecdca;
+  background: #fef3f2;
+  color: #b42318;
+}
+
+.toast.warning,
+.toast.info {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.import-progress {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  margin: 14px 0;
+}
+
+.import-progress-item {
+  border: 1px solid #dbe4f0;
+  border-radius: 12px;
+  padding: 10px;
+  background: #f8fafc;
+  display: grid;
+  gap: 4px;
+}
+
+.import-progress-item.loading {
+  border-color: #93c5fd;
+  background: #eff6ff;
+}
+
+.import-progress-item.done {
+  border-color: #abefc6;
+  background: #ecfdf3;
+}
+
+.import-progress-item.error {
+  border-color: #fecdca;
+  background: #fef3f2;
+}
+
+.import-progress-item strong {
+  font-size: 0.88rem;
+}
+
+.import-progress-item span {
+  color: #475569;
+  font-size: 0.82rem;
+}
+
+
 .import-history {
   margin-top: 16px;
   border-top: 1px solid #e2e8f0;

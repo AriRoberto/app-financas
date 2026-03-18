@@ -63,6 +63,29 @@ Projeto full-stack para controlar receitas e despesas familiares com foco em:
   - `POST /api/imports/commit`
   - `GET /api/imports/history`
 
+
+## Persistência financeira: adapter atual e futura troca por banco relacional
+- O backend agora usa a interface `FinanceRepository` em `backend/src/persistence/finance-repository.js`.
+- A implementação ativa continua sendo `JsonFinanceRepository` em `backend/src/persistence/local-store.js`, persistindo o snapshot em `backend/data/finance-state.json`.
+- Para migrar futuramente para um banco relacional, basta criar um novo adapter que implemente os mesmos métodos (`loadSnapshot`, `saveSnapshot`, `resetSnapshot`, `describe`) e trocar a factory utilizada pelo servidor.
+- A aplicação continua sem depender diretamente do formato JSON fora da camada de persistência.
+
+## Parser de importação: formatos e cabeçalhos suportados
+- Delimitadores suportados: vírgula (`,`) e ponto e vírgula (`;`).
+- Cabeçalhos compatíveis incluem variações comuns de:
+  - data: `data`, `data lançamento`, `data movimentação`, `booked_at`, `transaction_date`
+  - descrição: `descrição`, `descricao`, `histórico`, `historico lançamento`, `merchant`, `memo`, `detalhe`
+  - valor: `valor`, `valor movimentado`, `valor lançamento`, `amount`, `value`
+  - direção/tipo: `débito/crédito`, `debito_credito`, `natureza`, `dc`
+  - categoria: `categoria`, `categoria lançamento`
+- Quando `importType=transaction`, o backend também infere `income`/`expense` pelo sinal do valor ou por colunas de débito/crédito.
+
+## Docker
+- Subir tudo: `docker compose up --build`
+- Parar ambiente: `docker compose down`
+- Rebuild do zero: `docker compose build --no-cache`
+- Persistência local em container: o volume `./backend/data:/app/data` mantém o snapshot `finance-state.json` fora do container.
+
 ## Configuração segura
 Use `.env.example` e configure no ambiente:
 - `AISP_BASE_URL`

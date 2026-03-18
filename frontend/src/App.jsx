@@ -85,6 +85,15 @@ const initialImportState = {
   content: ''
 };
 
+const initialImportProgress = {
+  selected: { label: 'Arquivo selecionado', status: 'idle', detail: '' },
+  read: { label: 'Arquivo lido', status: 'idle', detail: '' },
+  preview: { label: 'Pré-visualização gerada', status: 'idle', detail: '' },
+  upload: { label: 'Envio ao backend', status: 'idle', detail: '' },
+  persist: { label: 'Persistência concluída', status: 'idle', detail: '' },
+  refresh: { label: 'Interface atualizada', status: 'idle', detail: '' }
+};
+
 function App() {
   const [dashboard, setDashboard] = useState(null);
   const [suggestions, setSuggestions] = useState([]);
@@ -118,6 +127,8 @@ function App() {
   const [importPreview, setImportPreview] = useState(null);
   const [importingFile, setImportingFile] = useState(false);
   const [importHistory, setImportHistory] = useState([]);
+  const [importProgress, setImportProgress] = useState(initialImportProgress);
+  const [toasts, setToasts] = useState([]);
 
   const currentCategories = useMemo(() => {
     if (form.type === 'income') return incomeCategories;
@@ -128,6 +139,30 @@ function App() {
 
   async function fetchNoStore(url, options = {}) {
     return fetch(url, { cache: 'no-store', ...options });
+  }
+
+
+  function resetImportProgress() {
+    setImportProgress(initialImportProgress);
+  }
+
+  function updateImportProgress(step, status, detail = '') {
+    setImportProgress((old) => ({
+      ...old,
+      [step]: {
+        ...old[step],
+        status,
+        detail
+      }
+    }));
+  }
+
+  function pushToast(type, message) {
+    const id = `${Date.now()}-${Math.random()}`;
+    setToasts((old) => [...old, { id, type, message }]);
+    window.setTimeout(() => {
+      setToasts((old) => old.filter((item) => item.id !== id));
+    }, 4500);
   }
 
   async function loadDescriptionTemplates(type, category) {
@@ -461,16 +496,26 @@ function App() {
   async function handleImportFileSelection(event) {
     const file = event.target.files?.[0];
     if (!file) return;
+
+    resetImportProgress();
+    updateImportProgress('selected', 'done', file.name);
+
     const content = await file.text();
     console.info('[imports] file selected', { name: file.name, size: file.size });
     setImportForm((old) => ({ ...old, fileName: file.name, content }));
     setImportPreview(null);
     setSuccessMessage('');
+    updateImportProgress('read', 'done', `${content.length} caractere(s) lido(s)`);
+    pushToast('info', `Arquivo ${file.name} carregado para importação.`);
   }
 
   async function handlePreviewImport() {
     setError('');
     setSuccessMessage('');
+    updateImportProgress('preview', 'idle', '');
+    updateImportProgress('upload', 'idle', '');
+    updateImportProgress('persist', 'idle', '');
+    updateImportProgress('refresh', 'idle', '');
 
     if (!importForm.content.trim()) {
       setError('Selecione um arquivo CSV/JSON ou cole o conteúdo para pré-visualizar.');
@@ -478,6 +523,7 @@ function App() {
     }
 
     setImportingFile(true);
+    updateImportProgress('preview', 'loading', 'Interpretando arquivo');
     try {
       console.info('[imports] preview request', {
         fileName: importForm.fileName || 'clipboard-import.csv',
@@ -498,8 +544,12 @@ function App() {
       console.info('[imports] preview response', { rows: data.summary?.totalRows || 0, duplicates: data.summary?.duplicates || 0, format: data.format });
       setImportPreview(data);
       setSuccessMessage(`Pré-visualização pronta: ${data.summary?.totalRows || 0} linha(s) interpretada(s).`);
+      updateImportProgress('preview', 'done', `${data.summary?.totalRows || 0} linha(s)`);
+      pushToast('success', `Pré-visualização gerada com ${data.summary?.totalRows || 0} registro(s).`);
     } catch (err) {
+      updateImportProgress('preview', 'error', 'Falha na pré-visualização');
       setError(err.message || 'Erro ao gerar pré-visualização.');
+      pushToast('error', err.message || 'Erro ao gerar pré-visualização.');
     } finally {
       setImportingFile(false);
     }
@@ -508,6 +558,9 @@ function App() {
   async function handleConfirmImport() {
     setError('');
     setSuccessMessage('');
+    updateImportProgress('upload', 'idle', '');
+    updateImportProgress('persist', 'idle', '');
+    updateImportProgress('refresh', 'idle', '');
 
     if (!importPreview?.rows?.length) {
       setError('Faça a pré-visualização antes de confirmar a importação.');
@@ -515,6 +568,7 @@ function App() {
     }
 
     setImportingFile(true);
+    updateImportProgress('upload', 'loading', 'Enviando para o backend');
     try {
       console.info('[imports] commit request', { fileName: importForm.fileName || 'clipboard-import.csv', memberId: importForm.memberId, importType: importForm.importType, previewRows: importPreview.rows.length });
       const response = await fetchNoStore(`${API_URL}/api/imports/commit`, {
@@ -529,15 +583,23 @@ function App() {
       if (!response.ok) throw new Error(data.message || 'Falha ao importar arquivo.');
       console.info('[imports] commit response', data);
       const nextMonth = data.importedMonths?.length ? data.importedMonths[data.importedMonths.length - 1] : selectedMonth;
+      updateImportProgress('upload', 'done', 'Payload aceito pelo backend');
+      updateImportProgress('persist', 'done', `${data.importedRows || 0} registro(s) persistido(s)`);
       setImportPreview(null);
       setImportForm((old) => ({ ...old, fileName: '', content: '' }));
       if (periodPreset === 'month' && nextMonth) {
         setSelectedMonth(nextMonth);
       }
       await loadData(nextMonth || selectedMonth);
+      updateImportProgress('refresh', 'done', 'Dashboard e lançamentos recarregados');
       setSuccessMessage(data.message || `Importação concluída: ${data.importedRows || 0} registro(s).`);
+      pushToast('success', data.message || `Importação concluída: ${data.importedRows || 0} registro(s).`);
+      if (data.duplicateRows) pushToast('warning', `${data.duplicateRows} registro(s) duplicado(s) foram ignorados.`);
     } catch (err) {
+      updateImportProgress('upload', 'error', 'Falha no envio');
+      updateImportProgress('persist', 'error', 'Persistência não concluída');
       setError(err.message || 'Erro ao confirmar importação.');
+      pushToast('error', err.message || 'Erro ao confirmar importação.');
     } finally {
       setImportingFile(false);
     }
@@ -612,6 +674,10 @@ function App() {
           </select>
         </label>
       </section>
+
+      <div className="toast-stack">
+        {toasts.map((toast) => <div key={toast.id} className={`toast ${toast.type}`}>{toast.message}</div>)}
+      </div>
 
       {error ? <p className="error">{error}</p> : null}
       {successMessage ? <p className="success">{successMessage}</p> : null}
@@ -721,6 +787,15 @@ function App() {
               <textarea rows="5" value={importForm.content} onChange={(e) => { setImportForm((old) => ({ ...old, content: e.target.value })); setImportPreview(null); }} />
             </label>
           </div>
+          <div className="import-progress">
+            {Object.entries(importProgress).map(([key, step]) => (
+              <div key={key} className={`import-progress-item ${step.status}`}>
+                <strong>{step.label}</strong>
+                <span>{step.detail || (step.status === 'idle' ? 'Aguardando' : step.status === 'loading' ? 'Em andamento' : step.status === 'done' ? 'Concluído' : 'Erro')}</span>
+              </div>
+            ))}
+          </div>
+
           <div className="form-actions">
             <button type="button" onClick={handlePreviewImport} disabled={importingFile || !importForm.content}>
               {importingFile ? 'Processando...' : 'Pré-visualizar importação'}
@@ -760,7 +835,7 @@ function App() {
               <ul>
                 {importHistory.slice(0, 5).map((item) => (
                   <li key={item.id}>
-                    <strong>{item.fileName}</strong> — {item.importedRows} importado(s), {item.duplicateRows} duplicado(s), membro {memberLabel(item.memberId)}.
+                    <strong>{item.fileName}</strong> — mês(es): {item.importedMonths?.join(', ') || '-'}, {item.importedRows} importado(s), {item.duplicateRows} duplicado(s), membro {memberLabel(item.memberId)}.
                   </li>
                 ))}
               </ul>
@@ -825,7 +900,16 @@ function App() {
                 Reserva para investir
               </label>
             ) : null}
-            <div className="form-actions">
+            <div className="import-progress">
+            {Object.entries(importProgress).map(([key, step]) => (
+              <div key={key} className={`import-progress-item ${step.status}`}>
+                <strong>{step.label}</strong>
+                <span>{step.detail || (step.status === 'idle' ? 'Aguardando' : step.status === 'loading' ? 'Em andamento' : step.status === 'done' ? 'Concluído' : 'Erro')}</span>
+              </div>
+            ))}
+          </div>
+
+          <div className="form-actions">
               <button disabled={saving} type="submit">{saving ? 'Salvando...' : 'Salvar'}</button>
               <button type="button" className="ghost" onClick={handleRestoreDemoData}>Trazer dados de teste</button>
               <button type="button" className="ghost danger" disabled={clearing} onClick={handleClearDemoData}>

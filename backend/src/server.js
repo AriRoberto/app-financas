@@ -25,12 +25,13 @@ import { registerMockAispRoutes } from './openfinance/mock-aisp.js';
 import { startPeriodicSync, syncByConnectionId } from './openfinance/sync-service.js';
 import { getInstitutionByKey } from './openfinance/institutions.js';
 import { previewImportRows } from './imports/service.js';
-import { loadFinanceState, resetFinanceState, saveFinanceState } from './persistence/local-store.js';
+import { createJsonFinanceRepository } from './persistence/local-store.js';
 
 const app = express();
 const PORT = process.env.PORT || 3333;
 const ofConfig = getEnvConfig();
 const aispClient = new AispClient(ofConfig);
+const financeRepository = createJsonFinanceRepository();
 const rateLimitSync = new Map();
 
 function getRequestScopedAispClient(req) {
@@ -154,7 +155,7 @@ const defaultFinanceState = {
   importHistory: []
 };
 
-const persistedFinanceState = loadFinanceState(defaultFinanceState);
+const persistedFinanceState = financeRepository.loadSnapshot(defaultFinanceState);
 
 let transactions = persistedFinanceState.transactions.map((item) => ({
   ...item,
@@ -570,7 +571,7 @@ function buildImportedTransaction(previewItem) {
 }
 
 function persistFinanceSnapshot(reason, extra = {}) {
-  saveFinanceState({ transactions, importHistory });
+  financeRepository.saveSnapshot({ transactions, importHistory });
   console.info('[finance-store] snapshot saved', { reason, ...extra, transactions: transactions.length, importHistory: importHistory.length });
 }
 
@@ -592,6 +593,10 @@ app.get('/api/categories', (_req, res) => {
 
 app.get('/api/description-templates', (req, res) => {
   res.json({ templates: getCategoryTemplates(req.query.type, req.query.category) });
+});
+
+app.get('/api/persistence/info', (_req, res) => {
+  res.json({ repository: financeRepository.describe() });
 });
 
 app.get('/api/months', (req, res) => {
@@ -620,7 +625,7 @@ app.delete('/api/transactions', (_req, res) => {
 });
 
 app.post('/api/transactions/seed', (_req, res) => {
-  const resetState = resetFinanceState(defaultFinanceState);
+  const resetState = financeRepository.resetSnapshot(defaultFinanceState);
   transactions = resetState.transactions.map((item) => ({
     ...item,
     memberId: normalizeMemberId(item.memberId),
@@ -729,6 +734,7 @@ app.post('/api/imports/commit', (req, res) => {
         memberId: normalizedMemberId,
         importedRows: imported,
         duplicateRows: duplicates,
+        importedMonths: [...importedMonths].sort(),
         createdAt: new Date().toISOString(),
         source: 'manual-file'
       },

@@ -2,11 +2,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { FinanceRepository, normalizeFinanceSnapshot } from './finance-repository.js';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DEFAULT_STATE_FILE = path.resolve(__dirname, '../../data/finance-state.json');
 
-function resolveStateFile() {
+export function resolveStateFile() {
   return process.env.APP_FINANCAS_DATA_FILE || DEFAULT_STATE_FILE;
 }
 
@@ -14,56 +16,78 @@ function ensureDirectory(filePath) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
 }
 
-function normalizeState(parsed, fallback) {
-  return {
-    transactions: Array.isArray(parsed?.transactions) ? parsed.transactions : fallback.transactions,
-    importHistory: Array.isArray(parsed?.importHistory) ? parsed.importHistory : fallback.importHistory
-  };
-}
-
-export function loadFinanceState(fallback = { transactions: [], importHistory: [] }) {
-  const stateFile = resolveStateFile();
-  ensureDirectory(stateFile);
-
-  if (!fs.existsSync(stateFile)) {
-    const initialState = normalizeState(fallback, fallback);
-    fs.writeFileSync(stateFile, `${JSON.stringify(initialState, null, 2)}\n`, 'utf8');
-    console.info('[finance-store] initialized state file', { stateFile, transactions: initialState.transactions.length });
-    return initialState;
+export class JsonFinanceRepository extends FinanceRepository {
+  constructor({ stateFile = resolveStateFile() } = {}) {
+    super();
+    this.stateFile = stateFile;
   }
 
-  try {
-    const raw = fs.readFileSync(stateFile, 'utf8');
-    const parsed = raw.trim() ? JSON.parse(raw) : {};
-    const normalized = normalizeState(parsed, fallback);
-    console.info('[finance-store] loaded state', {
-      stateFile,
+  describe() {
+    return {
+      kind: 'json-file',
+      stateFile: this.stateFile,
+      swapStrategy: 'Substitua esta classe por outro adapter que implemente a mesma interface FinanceRepository.'
+    };
+  }
+
+  loadSnapshot(fallback = { transactions: [], importHistory: [] }) {
+    ensureDirectory(this.stateFile);
+
+    if (!fs.existsSync(this.stateFile)) {
+      const initialState = normalizeFinanceSnapshot(fallback, fallback);
+      fs.writeFileSync(this.stateFile, `${JSON.stringify(initialState, null, 2)}\n`, 'utf8');
+      console.info('[finance-store] initialized state file', { stateFile: this.stateFile, transactions: initialState.transactions.length });
+      return initialState;
+    }
+
+    try {
+      const raw = fs.readFileSync(this.stateFile, 'utf8');
+      const parsed = raw.trim() ? JSON.parse(raw) : {};
+      const normalized = normalizeFinanceSnapshot(parsed, fallback);
+      console.info('[finance-store] loaded state', {
+        stateFile: this.stateFile,
+        transactions: normalized.transactions.length,
+        importHistory: normalized.importHistory.length
+      });
+      return normalized;
+    } catch (error) {
+      console.warn('[finance-store] failed to read state file, using fallback', {
+        stateFile: this.stateFile,
+        message: error?.message
+      });
+      return normalizeFinanceSnapshot({}, fallback);
+    }
+  }
+
+  saveSnapshot(nextState) {
+    ensureDirectory(this.stateFile);
+    const normalized = normalizeFinanceSnapshot(nextState, { transactions: [], importHistory: [] });
+    fs.writeFileSync(this.stateFile, `${JSON.stringify(normalized, null, 2)}\n`, 'utf8');
+    console.info('[finance-store] persisted state', {
+      stateFile: this.stateFile,
       transactions: normalized.transactions.length,
       importHistory: normalized.importHistory.length
     });
-    return normalized;
-  } catch (error) {
-    console.warn('[finance-store] failed to read state file, using fallback', {
-      stateFile,
-      message: error?.message
-    });
-    return normalizeState({}, fallback);
+  }
+
+  resetSnapshot(fallback = { transactions: [], importHistory: [] }) {
+    this.saveSnapshot(fallback);
+    return normalizeFinanceSnapshot(fallback, fallback);
   }
 }
 
+export function createJsonFinanceRepository(options = {}) {
+  return new JsonFinanceRepository(options);
+}
+
+export function loadFinanceState(fallback = { transactions: [], importHistory: [] }) {
+  return createJsonFinanceRepository().loadSnapshot(fallback);
+}
+
 export function saveFinanceState(nextState) {
-  const stateFile = resolveStateFile();
-  ensureDirectory(stateFile);
-  const normalized = normalizeState(nextState, { transactions: [], importHistory: [] });
-  fs.writeFileSync(stateFile, `${JSON.stringify(normalized, null, 2)}\n`, 'utf8');
-  console.info('[finance-store] persisted state', {
-    stateFile,
-    transactions: normalized.transactions.length,
-    importHistory: normalized.importHistory.length
-  });
+  return createJsonFinanceRepository().saveSnapshot(nextState);
 }
 
 export function resetFinanceState(fallback = { transactions: [], importHistory: [] }) {
-  saveFinanceState(fallback);
-  return normalizeState(fallback, fallback);
+  return createJsonFinanceRepository().resetSnapshot(fallback);
 }

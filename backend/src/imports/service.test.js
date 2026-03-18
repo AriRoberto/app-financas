@@ -7,6 +7,7 @@ import { previewImportRows } from './service.js';
 test('detectImportFormat detecta JSON e CSV sem depender do nome do arquivo', () => {
   assert.equal(detectImportFormat('', '[{"amount":10}]'), 'json');
   assert.equal(detectImportFormat('', 'date,amount\n2026-03-01,10'), 'csv');
+  assert.equal(detectImportFormat('', 'data;valor\n18/03/2026;10'), 'csv');
 });
 
 test('parseImportContent rejeita OFX nesta primeira entrega', () => {
@@ -42,6 +43,35 @@ test('previewImportRows normaliza CSV com datas e valores BR', () => {
   assert.match(result.rows[0].fingerprint, /^[a-f0-9]{64}$/);
 });
 
+test('previewImportRows suporta delimitador ponto e vírgula e cabeçalhos bancários flexíveis', () => {
+  const result = previewImportRows({
+    fileName: 'banco.csv',
+    content: 'Data lançamento;Histórico;Valor movimentado;Débito/Crédito\n18/03/2026;PIX recebido;2500,00;Crédito',
+    importType: 'transaction',
+    memberId: 'husband',
+    fallbackMonth: '2026-03'
+  });
+
+  assert.equal(result.rows.length, 1);
+  assert.equal(result.rows[0].type, 'income');
+  assert.equal(result.rows[0].description, 'PIX recebido');
+  assert.equal(result.rows[0].amount, 2500);
+  assert.equal(result.rows[0].date, '2026-03-18');
+});
+
+test('previewImportRows usa sinal negativo para inferir despesa quando importType é transaction', () => {
+  const result = previewImportRows({
+    fileName: 'extrato.csv',
+    content: 'data movimentação;descrição;valor\n18/03/2026;Mercado;-125,45',
+    importType: 'transaction',
+    memberId: 'wife',
+    fallbackMonth: '2026-03'
+  });
+
+  assert.equal(result.rows[0].type, 'expense');
+  assert.equal(result.rows[0].amount, 125.45);
+});
+
 test('previewImportRows usa fallback quando conteúdo colado não tem filename', () => {
   const result = previewImportRows({
     fileName: '',
@@ -57,13 +87,11 @@ test('previewImportRows usa fallback quando conteúdo colado não tem filename',
   assert.equal(result.rows[0].month, '2026-03');
 });
 
-
 test('previewImportRows falha com valor ausente no CSV', () => {
   assert.throws(
     () => previewImportRows({
       fileName: 'extrato.csv',
-      content: `data,descricao,valor
-18/03/2026,Supermercado,`,
+      content: `data,descricao,valor\n18/03/2026,Supermercado,`,
       importType: 'expense',
       memberId: 'wife',
       fallbackMonth: '2026-03'

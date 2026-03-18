@@ -1,20 +1,25 @@
 import { buildImportFingerprint, parseImportContent } from './parser.js';
 
-function parseAmount(raw) {
+function parseSignedAmount(raw) {
   if (typeof raw === 'number') {
-    if (Number.isNaN(raw) || raw <= 0) throw new Error('Valor inválido no arquivo.');
+    if (Number.isNaN(raw) || raw === 0) throw new Error('Valor inválido no arquivo.');
     return raw;
   }
 
-  if (String(raw ?? '').trim() === '') throw new Error('Valor ausente no arquivo.');
+  const rawValue = String(raw ?? '').trim();
+  if (rawValue === '') throw new Error('Valor ausente no arquivo.');
 
-  const normalized = String(raw || '')
+  const negative = rawValue.startsWith('-') || rawValue.endsWith('-') || /^\(.+\)$/.test(rawValue);
+  const cleaned = rawValue
+    .replace(/[()]/g, '')
     .replace(/\./g, '')
     .replace(',', '.')
-    .replace(/[^\d.-]/g, '');
-  const value = Number(normalized);
-  if (Number.isNaN(value) || value <= 0) throw new Error('Valor inválido no arquivo.');
-  return value;
+    .replace(/[^\d.-]/g, '')
+    .replace(/-$/g, '');
+
+  const value = Number(cleaned);
+  if (Number.isNaN(value) || value === 0) throw new Error('Valor inválido no arquivo.');
+  return negative ? -Math.abs(value) : value;
 }
 
 function pickValue(row, keys) {
@@ -24,12 +29,25 @@ function pickValue(row, keys) {
   return '';
 }
 
-function normalizeType(rawType, importType) {
-  const value = String(rawType || importType || 'transaction').toLowerCase();
-  if (['receita', 'income', 'credit'].includes(value)) return 'income';
-  if (['investimento', 'investment'].includes(value)) return 'investment';
-  if (['despesa', 'expense', 'debit', 'transaction', 'transacao', 'transação'].includes(value)) return 'expense';
-  return 'expense';
+function normalizeDirection(raw) {
+  const value = String(raw || '').trim().toLowerCase();
+  if (['credito', 'crédito', 'credit', 'c', 'entrada'].includes(value)) return 'credit';
+  if (['debito', 'débito', 'debit', 'd', 'saida', 'saída'].includes(value)) return 'debit';
+  return '';
+}
+
+function normalizeType(rawType, importType, signedAmount) {
+  const explicit = String(rawType || '').toLowerCase();
+  if (['receita', 'income', 'credit'].includes(explicit)) return 'income';
+  if (['investimento', 'investment'].includes(explicit)) return 'investment';
+  if (['despesa', 'expense', 'debit', 'transaction', 'transacao', 'transação'].includes(explicit)) return 'expense';
+
+  const forced = String(importType || 'transaction').toLowerCase();
+  if (forced === 'income') return 'income';
+  if (forced === 'expense') return 'expense';
+  if (forced === 'investment') return 'investment';
+
+  return signedAmount < 0 ? 'expense' : 'income';
 }
 
 function normalizeDate(raw, fallbackMonth) {
@@ -46,16 +64,28 @@ function normalizeMonth(date) {
   return String(date).slice(0, 7);
 }
 
+function resolveEffectiveAmountAndType(row, importType) {
+  const signedAmount = parseSignedAmount(pickValue(row, ['amount', 'valor', 'value', 'valor_movimentado', 'valor_lancamento']));
+  const direction = normalizeDirection(pickValue(row, ['entry_direction', 'debito_credito', 'debito_ou_credito', 'natureza', 'dc']));
+  const explicitType = pickValue(row, ['type', 'tipo', 'entry_type']);
+
+  let normalizedSignedAmount = signedAmount;
+  if (direction === 'debit') normalizedSignedAmount = -Math.abs(signedAmount);
+  if (direction === 'credit') normalizedSignedAmount = Math.abs(signedAmount);
+
+  const type = normalizeType(direction || explicitType, importType, normalizedSignedAmount);
+  return { amount: Math.abs(normalizedSignedAmount), type };
+}
+
 export function previewImportRows({ fileName, content, importType, memberId, fallbackMonth = new Date().toISOString().slice(0, 7) }) {
   const { format, rows } = parseImportContent({ fileName, content });
   const preview = rows.map((row, index) => {
     try {
-      const type = normalizeType(pickValue(row, ['type', 'tipo', 'entry_type']), importType);
-      const date = normalizeDate(pickValue(row, ['date', 'data', 'booked_at']), fallbackMonth);
-      const category = pickValue(row, ['category', 'categoria']) || (type === 'income' ? 'Salário' : type === 'investment' ? 'Renda fixa' : 'Outros');
-      const description = pickValue(row, ['description', 'descricao', 'descrição', 'merchant', 'historico', 'historico_lancamento']) || `Importação ${index + 1}`;
-      const amount = parseAmount(pickValue(row, ['amount', 'valor', 'value']));
-      const dueDate = normalizeDate(pickValue(row, ['due_date', 'vencimento']), normalizeMonth(date));
+      const { amount, type } = resolveEffectiveAmountAndType(row, importType);
+      const date = normalizeDate(pickValue(row, ['date', 'data', 'booked_at', 'data_lancamento', 'data_movimentacao', 'data_movimento', 'transaction_date']), fallbackMonth);
+      const category = pickValue(row, ['category', 'categoria', 'categoria_lancamento']) || (type === 'income' ? 'Salário' : type === 'investment' ? 'Renda fixa' : 'Outros');
+      const description = pickValue(row, ['description', 'descricao', 'descrição', 'merchant', 'historico', 'historico_lancamento', 'detalhe', 'memo']) || `Importação ${index + 1}`;
+      const dueDate = normalizeDate(pickValue(row, ['due_date', 'vencimento', 'data_vencimento']), normalizeMonth(date));
 
       return {
         importType,

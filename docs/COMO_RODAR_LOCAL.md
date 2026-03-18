@@ -127,3 +127,71 @@ SYNC_DEFAULT_DAYS=90
 4. Inspecione a resposta do endpoint de importação para conferir `importedRows`, `duplicateRows` e `importedMonths`.
 5. Verifique se o arquivo `backend/data/finance-state.json` recebeu os registros persistidos.
 6. Se os dados não aparecerem, confirme se o filtro de período/mês selecionado corresponde ao mês importado.
+
+
+## Persistência atual e futura troca para banco relacional
+- Hoje o app usa `FinanceRepository` como contrato de persistência.
+- O adapter ativo é `JsonFinanceRepository`, que grava em `backend/data/finance-state.json`.
+- Para migrar para PostgreSQL/MySQL/etc., crie um novo adapter com os mesmos métodos (`loadSnapshot`, `saveSnapshot`, `resetSnapshot`, `describe`) e troque a factory do servidor.
+- O restante do fluxo de importação e dashboard pode permanecer inalterado.
+
+## Testes de integração do endpoint `/api/imports/commit`
+- Execute:
+  ```bash
+  cd backend
+  npm test
+  ```
+- Os testes cobrem:
+  - sucesso do commit
+  - falha por payload inválido
+  - associação ao membro correto
+  - persistência do histórico e do snapshot local
+- Limitação atual: o ambiente continua usando shims locais de `express`/`cors` para executar os testes sem instalar dependências externas.
+
+## Histórico de importações na UI
+- O bloco **Últimas importações** agora mostra:
+  - nome do arquivo
+  - mês(es) efetivamente importado(s)
+  - quantidade importada
+  - quantidade duplicada
+  - membro associado
+
+## Feedback visual por etapa
+- A UI agora exibe etapas da importação:
+  - arquivo selecionado
+  - arquivo lido
+  - pré-visualização gerada
+  - envio ao backend
+  - persistência concluída
+  - interface atualizada
+- Também existem toasts/snackbars para sucesso, erro, aviso e informação.
+
+## Docker: subir, rebuildar, parar e persistir dados
+### Subir tudo
+```bash
+docker compose up --build
+```
+
+### Parar o ambiente
+```bash
+docker compose down
+```
+
+### Rebuild completo
+```bash
+docker compose build --no-cache
+```
+
+### Persistência local no modo containerizado
+- O snapshot continua em `backend/data/finance-state.json`.
+- No compose, o volume `./backend/data:/app/data` preserva os dados entre reinícios dos containers.
+
+### Debug básico em containers
+- Logs do backend:
+  ```bash
+  docker compose logs -f backend
+  ```
+- Logs do frontend:
+  ```bash
+  docker compose logs -f frontend
+  ```

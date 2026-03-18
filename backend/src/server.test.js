@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import {
   __resetOpenFinanceStore,
   app,
@@ -8,6 +9,7 @@ import {
   encryptToken
 } from './server.js';
 import { createConnection, createConsent, updateConnection, __resetOpenFinanceStore as __resetStoreInternal } from './openfinance/store.js';
+import { resolveStateFile } from './persistence/local-store.js';
 
 async function withServer(run) {
   const server = app.listen(0);
@@ -227,5 +229,81 @@ test('sync retorna resumo com contagem importada', async () => {
     assert.ok(typeof syncData.transactionsImported === 'number');
     assert.ok(syncData.from);
     assert.ok(syncData.to);
+  });
+});
+
+
+test('import commit persiste transações importadas e associa ao membro correto', async () => {
+  await withServer(async (baseUrl) => {
+    await fetch(`${baseUrl}/api/transactions/seed`, { method: 'POST' });
+
+    const response = await fetch(`${baseUrl}/api/imports/commit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fileName: 'extrato.csv',
+        content: 'Data lançamento;Histórico;Valor movimentado;Débito/Crédito\n18/04/2026;Mercado bairro;125,45;Débito',
+        importType: 'transaction',
+        memberId: 'wife',
+        month: '2026-04'
+      })
+    });
+
+    assert.equal(response.status, 200);
+    const data = await response.json();
+    assert.equal(data.importedRows, 1);
+    assert.deepEqual(data.importedMonths, ['2026-04']);
+
+    const txRes = await fetch(`${baseUrl}/api/transactions?member=wife&month=2026-04&from=2026-04-01&to=2026-04-30`);
+    const txData = await txRes.json();
+    assert.equal(txData.transactions.length, 1);
+    assert.equal(txData.transactions[0].memberId, 'wife');
+    assert.equal(txData.transactions[0].description, 'Mercado bairro');
+    assert.equal(txData.transactions[0].amount, 125.45);
+
+    const historyRes = await fetch(`${baseUrl}/api/imports/history`);
+    const historyData = await historyRes.json();
+    assert.equal(historyData.imports[0].memberId, 'wife');
+    assert.deepEqual(historyData.imports[0].importedMonths, ['2026-04']);
+
+    const persisted = JSON.parse(fs.readFileSync(resolveStateFile(), 'utf8'));
+    assert.ok(persisted.transactions.some((item) => item.description === 'Mercado bairro' && item.memberId === 'wife'));
+  });
+});
+
+test('import commit rejeita payload sem conteúdo', async () => {
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/imports/commit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fileName: 'extrato.csv', importType: 'transaction', memberId: 'wife', month: '2026-04' })
+    });
+
+    assert.equal(response.status, 400);
+    const data = await response.json();
+    assert.match(data.message, /conteúdo/i);
+  });
+});
+
+test('import commit persiste histórico e permite futura validação via repository', async () => {
+  await withServer(async (baseUrl) => {
+    await fetch(`${baseUrl}/api/transactions/seed`, { method: 'POST' });
+
+    await fetch(`${baseUrl}/api/imports/commit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fileName: 'extrato.csv',
+        content: 'data,descricao,valor\n2026-05-02,Freelance,900.00',
+        importType: 'income',
+        memberId: 'husband',
+        month: '2026-05'
+      })
+    });
+
+    const persisted = JSON.parse(fs.readFileSync(resolveStateFile(), 'utf8'));
+    assert.ok(Array.isArray(persisted.importHistory));
+    assert.equal(persisted.importHistory[0].memberId, 'husband');
+    assert.deepEqual(persisted.importHistory[0].importedMonths, ['2026-05']);
   });
 });
