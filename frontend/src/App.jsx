@@ -78,6 +78,13 @@ const initialForm = {
   isInvestmentReserve: false
 };
 
+const initialImportState = {
+  memberId: 'husband',
+  importType: 'transaction',
+  fileName: '',
+  content: ''
+};
+
 function App() {
   const [dashboard, setDashboard] = useState(null);
   const [suggestions, setSuggestions] = useState([]);
@@ -106,6 +113,9 @@ function App() {
   const [bankInstitutions, setBankInstitutions] = useState([]);
   const [bankConnections, setBankConnections] = useState([]);
   const [recoveryPlan, setRecoveryPlan] = useState(null);
+  const [importForm, setImportForm] = useState(initialImportState);
+  const [importPreview, setImportPreview] = useState(null);
+  const [importingFile, setImportingFile] = useState(false);
 
   const currentCategories = useMemo(() => {
     if (form.type === 'income') return incomeCategories;
@@ -154,6 +164,7 @@ function App() {
 
     const category = categoriesData.expenseCategories?.[0] || 'Outros';
     setForm((old) => ({ ...old, memberId: membersData.members?.[0]?.id || 'husband', category }));
+    setImportForm((old) => ({ ...old, memberId: membersData.members?.[0]?.id || 'husband' }));
     await loadDescriptionTemplates('expense', category);
   }
 
@@ -405,6 +416,60 @@ function App() {
     }
   }
 
+  async function handleImportFileSelection(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const content = await file.text();
+    setImportForm((old) => ({ ...old, fileName: file.name, content }));
+    setImportPreview(null);
+  }
+
+  async function handlePreviewImport() {
+    setError('');
+    setImportingFile(true);
+    try {
+      const response = await fetchNoStore(`${API_URL}/api/imports/preview`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...importForm,
+          month: selectedMonth
+        })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Falha ao pré-visualizar importação.');
+      setImportPreview(data);
+    } catch (err) {
+      setError(err.message || 'Erro ao gerar pré-visualização.');
+    } finally {
+      setImportingFile(false);
+    }
+  }
+
+  async function handleConfirmImport() {
+    setError('');
+    setImportingFile(true);
+    try {
+      const response = await fetchNoStore(`${API_URL}/api/imports/commit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...importForm,
+          month: selectedMonth
+        })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Falha ao importar arquivo.');
+      setImportPreview(null);
+      setImportForm((old) => ({ ...old, fileName: '', content: '' }));
+      await loadData(selectedMonth);
+    } catch (err) {
+      setError(err.message || 'Erro ao confirmar importação.');
+    } finally {
+      setImportingFile(false);
+    }
+  }
+
   function changePreset(nextPreset) {
     setPeriodPreset(nextPreset);
     const range = getPresetRange(nextPreset);
@@ -558,6 +623,64 @@ function App() {
       </section>
 
       <section className="content-grid">
+        <article className="panel">
+          <h2>Importação manual de arquivos</h2>
+          <p className="panel-help">Importe CSV ou JSON baixado do banco/corretora e vincule ao membro correto sem depender de Open Finance nesta etapa.</p>
+          <div className="form-grid">
+            <label>Membro do lançamento
+              <select value={importForm.memberId} onChange={(e) => setImportForm((old) => ({ ...old, memberId: e.target.value }))}>
+                {members.map((member) => <option key={member.id} value={member.id}>{memberLabel(member.id)}</option>)}
+              </select>
+            </label>
+            <label>Tipo de dado
+              <select value={importForm.importType} onChange={(e) => setImportForm((old) => ({ ...old, importType: e.target.value }))}>
+                <option value="transaction">Transações / movimentações</option>
+                <option value="income">Receitas</option>
+                <option value="expense">Despesas</option>
+                <option value="investment">Investimentos</option>
+              </select>
+            </label>
+            <label>Arquivo (CSV ou JSON)
+              <input type="file" accept=".csv,.json,.ofx,application/json,text/csv" onChange={handleImportFileSelection} />
+            </label>
+            <label>Ou cole o conteúdo
+              <textarea rows="5" value={importForm.content} onChange={(e) => setImportForm((old) => ({ ...old, content: e.target.value }))} />
+            </label>
+          </div>
+          <div className="form-actions">
+            <button type="button" onClick={handlePreviewImport} disabled={importingFile || !importForm.content}>
+              {importingFile ? 'Processando...' : 'Pré-visualizar importação'}
+            </button>
+            <button type="button" className="ghost" onClick={handleConfirmImport} disabled={importingFile || !importPreview?.rows?.length}>
+              Confirmar importação
+            </button>
+          </div>
+
+          {importPreview ? (
+            <div className="table-wrap import-preview">
+              <p className="panel-help">
+                {importPreview.summary.totalRows} linhas lidas, {importPreview.summary.duplicates} possíveis duplicidades.
+              </p>
+              <table>
+                <thead>
+                  <tr><th>Data</th><th>Tipo</th><th>Categoria</th><th>Descrição</th><th>Valor</th></tr>
+                </thead>
+                <tbody>
+                  {importPreview.rows.slice(0, 8).map((row) => (
+                    <tr key={row.fingerprint}>
+                      <td>{row.date}</td>
+                      <td>{typeLabel(row.type)}</td>
+                      <td>{row.category}</td>
+                      <td>{row.description}</td>
+                      <td>{currency.format(row.amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+        </article>
+
         <article className="panel">
           <h2>Cadastro de lançamentos</h2>
           <form onSubmit={submitTransaction} className="form-grid">

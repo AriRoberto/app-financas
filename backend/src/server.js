@@ -24,6 +24,7 @@ import {
 import { registerMockAispRoutes } from './openfinance/mock-aisp.js';
 import { startPeriodicSync, syncByConnectionId } from './openfinance/sync-service.js';
 import { getInstitutionByKey } from './openfinance/institutions.js';
+import { previewImportRows } from './imports/service.js';
 
 const app = express();
 const PORT = process.env.PORT || 3333;
@@ -138,6 +139,7 @@ function cloneSampleTransactions() {
 
 let transactions = cloneSampleTransactions();
 let investments = [];
+let importHistory = [];
 
 function endOfCurrentYear() {
   const now = new Date();
@@ -520,6 +522,28 @@ function upsertInvestmentFromReserve(transaction) {
   }
 }
 
+function hasImportedFingerprint(fingerprint) {
+  return transactions.some((item) => item.importFingerprint === fingerprint);
+}
+
+function buildImportedTransaction(previewItem) {
+  return {
+    id: `imp-${Date.now()}-${Math.floor(Math.random() * 100000)}`,
+    memberId: previewItem.memberId,
+    type: previewItem.type,
+    category: previewItem.category,
+    description: previewItem.description,
+    amount: previewItem.amount,
+    month: previewItem.month,
+    date: previewItem.date,
+    dueDate: previewItem.dueDate,
+    term: previewItem.type === 'expense' ? classifyTerm(previewItem.dueDate || previewItem.date) : null,
+    isInvestmentReserve: previewItem.type === 'expense' ? previewItem.category === 'Reserva para investir' : false,
+    importFingerprint: previewItem.fingerprint,
+    importSource: 'manual-file'
+  };
+}
+
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, service: 'backend', timestamp: new Date().toISOString() });
 });
@@ -567,6 +591,113 @@ app.post('/api/transactions/seed', (_req, res) => {
   transactions = cloneSampleTransactions();
   seedInvestmentsFromTransactions();
   res.json({ message: 'Dados de exemplo restaurados.', transactionsCount: transactions.length });
+});
+
+app.get('/api/imports/history', (_req, res) => {
+  res.json({ imports: importHistory.slice().reverse() });
+});
+
+app.post('/api/imports/preview', (req, res) => {
+  try {
+    const { fileName, content, importType = 'transaction', memberId, month } = req.body;
+    const normalizedMemberId = normalizeMemberId(memberId);
+
+    if (!validateMember(normalizedMemberId)) {
+      return res.status(400).json({ message: 'Membro inválido para importação.' });
+    }
+
+    if (!content) {
+      return res.status(400).json({ message: 'Informe o conteúdo do arquivo.' });
+    }
+
+    const safeFileName = fileName || 'clipboard-import.csv';
+
+    const preview = previewImportRows({
+      fileName: safeFileName,
+      content,
+      importType,
+      memberId: normalizedMemberId,
+      fallbackMonth: isValidMonth(month || '') ? month : new Date().toISOString().slice(0, 7)
+    });
+
+    return res.json({
+      fileName: safeFileName,
+      format: preview.format,
+      importType,
+      memberId: normalizedMemberId,
+      rows: preview.rows,
+      summary: {
+        totalRows: preview.rows.length,
+        duplicates: preview.rows.filter((item) => hasImportedFingerprint(item.fingerprint)).length
+      }
+    });
+  } catch (err) {
+    return res.status(400).json({ message: err.message || 'Falha ao pré-visualizar arquivo.' });
+  }
+});
+
+app.post('/api/imports/commit', (req, res) => {
+  try {
+    const { fileName, content, importType = 'transaction', memberId, month } = req.body;
+    const normalizedMemberId = normalizeMemberId(memberId);
+
+    if (!validateMember(normalizedMemberId)) {
+      return res.status(400).json({ message: 'Membro inválido para importação.' });
+    }
+
+    if (!content) {
+      return res.status(400).json({ message: 'Informe o conteúdo do arquivo.' });
+    }
+
+    const safeFileName = fileName || 'clipboard-import.csv';
+
+    const preview = previewImportRows({
+      fileName: safeFileName,
+      content,
+      importType,
+      memberId: normalizedMemberId,
+      fallbackMonth: isValidMonth(month || '') ? month : new Date().toISOString().slice(0, 7)
+    });
+
+    let imported = 0;
+    let duplicates = 0;
+
+    for (const row of preview.rows) {
+      if (hasImportedFingerprint(row.fingerprint)) {
+        duplicates += 1;
+        continue;
+      }
+
+      const transaction = buildImportedTransaction(row);
+      transactions = [transaction, ...transactions];
+      upsertInvestmentFromReserve(transaction);
+      imported += 1;
+    }
+
+    importHistory = [
+      {
+        id: `import-${Date.now()}`,
+        fileName: safeFileName,
+        format: preview.format,
+        importType,
+        memberId: normalizedMemberId,
+        importedRows: imported,
+        duplicateRows: duplicates,
+        createdAt: new Date().toISOString(),
+        source: 'manual-file'
+      },
+      ...importHistory
+    ];
+
+    return res.json({
+      message: imported ? 'Importação concluída com sucesso.' : 'Nenhum novo registro foi importado.',
+      importedRows: imported,
+      duplicateRows: duplicates,
+      totalRows: preview.rows.length
+    });
+  } catch (err) {
+    return res.status(400).json({ message: err.message || 'Falha ao importar arquivo.' });
+  }
 });
 
 app.post('/api/transactions', (req, res) => {
