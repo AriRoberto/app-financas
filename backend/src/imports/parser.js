@@ -46,7 +46,17 @@ const HEADER_ALIASES = {
   classe: 'category',
 
   vencimento: 'due_date',
-  data_vencimento: 'due_date'
+  data_vencimento: 'due_date',
+
+  agencia: 'agencia',
+  agência: 'agencia',
+  branch: 'agencia',
+  conta_corrente: 'conta',
+  numero_conta: 'conta',
+  descricao_lancamento: 'description',
+  valor_rs: 'amount',
+  valor_r: 'amount',
+  saldo_em_conta: 'balance'
 };
 
 function normalizeHeader(value) {

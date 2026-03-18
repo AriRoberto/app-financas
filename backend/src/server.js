@@ -25,6 +25,7 @@ import { registerMockAispRoutes } from './openfinance/mock-aisp.js';
 import { startPeriodicSync, syncByConnectionId } from './openfinance/sync-service.js';
 import { getInstitutionByKey } from './openfinance/institutions.js';
 import { previewImportRows } from './imports/service.js';
+import { buildFinancialDashboard, filterFinancialTransactions, listAvailableAccounts, listAvailableBanks } from './services/aggregation-service.js';
 import { createJsonFinanceRepository } from './persistence/local-store.js';
 
 const app = express();
@@ -141,12 +142,47 @@ function normalizeMemberId(value) {
   return value;
 }
 
-function cloneSampleTransactions() {
-  return sampleTransactions.map((item) => ({
+
+function normalizeBankKey(value) {
+  const safe = String(value || 'MANUAL').trim().toUpperCase();
+  if (!safe) return 'MANUAL';
+  return safe;
+}
+
+function enrichTransaction(item) {
+  const memberId = normalizeMemberId(item.memberId);
+  const bankKey = normalizeBankKey(item.bankKey || item.bank || 'MANUAL');
+  const bankName = item.bankName || ({ BB: 'Banco do Brasil', ITAU: 'Itaú', MANUAL: 'Lançamento manual' }[bankKey] || bankKey);
+  const accountId = String(item.accountId || `${bankKey.toLowerCase()}-${memberId}-principal`).replace(/[^a-z0-9-]+/gi, '-').toLowerCase();
+  const accountLabel = item.accountLabel || `Conta ${bankName}`;
+  const date = item.date || `${item.month || new Date().toISOString().slice(0, 7)}-01`;
+  const month = isValidMonth(item.month) ? item.month : getMonthFromDate(date);
+  return {
     ...item,
-    memberId: normalizeMemberId(item.memberId),
-    term: item.type === 'expense' ? classifyTerm(item.dueDate || item.date) : null,
-    isInvestmentReserve: Boolean(item.isInvestmentReserve || item.category === 'Reserva para investir')
+    memberId,
+    bankKey,
+    bankName,
+    accountId,
+    accountLabel,
+    sourceFileName: item.sourceFileName || item.fileName || '',
+    importOrigin: item.importOrigin || item.importSource || 'manual-entry',
+    referencePeriod: item.referencePeriod || month,
+    month,
+    term: item.type === 'expense' ? classifyTerm(item.dueDate || date) : null,
+    isInvestmentReserve: item.type === 'expense' ? Boolean(item.isInvestmentReserve || item.category === 'Reserva para investir') : false
+  };
+}
+
+function cloneSampleTransactions() {
+  return sampleTransactions.map((item, index) => enrichTransaction({
+    ...item,
+    bankKey: index % 2 === 0 ? 'BB' : 'ITAU',
+    bankName: index % 2 === 0 ? 'Banco do Brasil' : 'Itaú',
+    accountId: index % 2 === 0 ? 'bb-conta-familia' : 'itau-conta-familia',
+    accountLabel: index % 2 === 0 ? 'Conta BB Família' : 'Conta Itaú Família',
+    sourceFileName: 'seed-data',
+    importOrigin: 'seed',
+    referencePeriod: item.month
   }));
 }
 
@@ -157,13 +193,7 @@ const defaultFinanceState = {
 
 const persistedFinanceState = financeRepository.loadSnapshot(defaultFinanceState);
 
-let transactions = persistedFinanceState.transactions.map((item) => ({
-  ...item,
-  memberId: normalizeMemberId(item.memberId),
-  month: isValidMonth(item.month) ? item.month : getMonthFromDate(item.date || `${new Date().toISOString().slice(0, 7)}-01`),
-  term: item.type === 'expense' ? classifyTerm(item.dueDate || item.date) : null,
-  isInvestmentReserve: item.type === 'expense' ? Boolean(item.isInvestmentReserve || item.category === 'Reserva para investir') : false
-}));
+let transactions = persistedFinanceState.transactions.map((item) => enrichTransaction(item));
 let investments = [];
 let importHistory = persistedFinanceState.importHistory || [];
 
@@ -230,13 +260,18 @@ function inPeriod(transaction, from, to) {
   return true;
 }
 
-function filterTransactions({ month, member = 'all', from, to, term }) {
-  return transactions.filter((item) => {
-    if (month && isValidMonth(month) && item.month !== month) return false;
-    if (!isMemberMatch(item, member)) return false;
-    if (!inPeriod(item, from, to)) return false;
-    if (term && term !== 'all' && item.type === 'expense' && item.term !== term) return false;
-    return true;
+function filterTransactions(filters = {}) {
+  return filterFinancialTransactions(transactions, {
+    month: filters.month,
+    member: normalizeMemberId(filters.member || 'all'),
+    bank: filters.bank || 'all',
+    accountId: filters.accountId || 'all',
+    type: filters.type || 'all',
+    category: filters.category || 'all',
+    term: filters.term || 'all',
+    from: filters.from,
+    to: filters.to,
+    search: filters.search || ''
   });
 }
 
@@ -250,71 +285,30 @@ function calculateSummary(filteredTransactions) {
   return { income, expenses, investmentsTotal, outflow, balance: income - outflow };
 }
 
-function buildDashboard({ month, member = 'all', from, to, term = 'all' }) {
-  const filteredTransactions = filterTransactions({ month, member, from, to, term });
-  const months = getAvailableMonths(filteredTransactions);
-  const summary = calculateSummary(filteredTransactions);
-
-  const categoryTotals = filteredTransactions
-    .filter((item) => item.type === 'expense')
-    .reduce((acc, item) => {
-      acc[item.category] = (acc[item.category] || 0) + item.amount;
-      return acc;
-    }, {});
-
-  const categories = Object.entries(categoryTotals).map(([name, amount]) => ({ name, amount })).sort((a, b) => b.amount - a.amount);
-
-  const byMember = members.map((memberItem) => {
-    const data = filteredTransactions.filter((item) => item.memberId === memberItem.id);
-    const income = data.filter((item) => item.type === 'income').reduce((sum, item) => sum + item.amount, 0);
-    const expenses = data.filter((item) => item.type === 'expense').reduce((sum, item) => sum + item.amount, 0);
-    const reserveInvestments = data.filter((item) => item.type === 'expense' && item.isInvestmentReserve).reduce((sum, item) => sum + item.amount, 0);
-    const directInvestments = data.filter((item) => item.type === 'investment').reduce((sum, item) => sum + item.amount, 0);
-    const investments = reserveInvestments + directInvestments;
-    return { memberId: memberItem.id, memberName: memberItem.name, income, expenses, investments, balance: income - expenses - directInvestments };
+function buildDashboard({ month, member = 'all', bank = 'all', accountId = 'all', from, to, term = 'all', type = 'all', category = 'all', search = '' }) {
+  return buildFinancialDashboard({
+    transactions,
+    members,
+    filters: {
+      month,
+      member: normalizeMemberId(member),
+      bank,
+      accountId,
+      from,
+      to,
+      term,
+      type,
+      category,
+      search
+    }
   });
-
-  const termTotals = ['short', 'medium', 'long'].map((name) => ({
-    term: name,
-    total: filteredTransactions
-      .filter((item) => item.type === 'expense' && item.term === name)
-      .reduce((sum, item) => sum + item.amount, 0)
-  }));
-
-  const monthlyHistory = getAvailableMonths(filteredTransactions).map((monthItem) => {
-    const data = filteredTransactions.filter((item) => item.month === monthItem);
-    const income = data.filter((item) => item.type === 'income').reduce((sum, item) => sum + item.amount, 0);
-    const expenses = data.filter((item) => item.type === 'expense').reduce((sum, item) => sum + item.amount, 0);
-    const directInvestments = data.filter((item) => item.type === 'investment').reduce((sum, item) => sum + item.amount, 0);
-    return { month: monthItem, income, expenses, investments: directInvestments, balance: income - expenses - directInvestments };
-  });
-
-  return {
-    filters: { month, member: normalizeMemberId(member), from, to, term },
-    income: summary.income,
-    expenses: summary.expenses,
-    investments: summary.investmentsTotal,
-    outflow: summary.outflow,
-    balance: summary.balance,
-    categories,
-    byMember,
-    availableMonths: months,
-    termTotals,
-    projection: {
-      basedOnMonths: months.slice(-3),
-      projectedNextMonthOutflow: months.length
-        ? Number((monthlyHistory.slice(-3).reduce((sum, item) => sum + item.expenses + item.investments, 0) / Math.min(monthlyHistory.length, 3)).toFixed(2))
-        : 0
-    },
-    monthlyHistory
-  };
 }
 
 function buildSuggestions(dashboard) {
   const topCategory = dashboard.categories[0];
   return {
     suggestions: [
-      topCategory ? `Maior categoria de saída: ${topCategory.name}.` : 'Cadastre despesas para gerar sugestões.',
+      topCategory ? `Maior categoria de saída: ${topCategory.label}.` : 'Cadastre despesas para gerar sugestões.',
       `Saldo atual filtrado: ${dashboard.balance.toFixed(2)}.`
     ]
   };
@@ -534,6 +528,10 @@ function upsertInvestmentFromReserve(transaction) {
   const next = {
     id: existing?.id || `inv-${transaction.id}`,
     memberId: transaction.memberId,
+    bankKey: transaction.bankKey,
+    bankName: transaction.bankName,
+    accountId: transaction.accountId,
+    accountLabel: transaction.accountLabel,
     date: transaction.date,
     amount: transaction.amount,
     sourceTransactionId: transaction.id,
@@ -553,7 +551,7 @@ function hasImportedFingerprint(fingerprint) {
 }
 
 function buildImportedTransaction(previewItem) {
-  return {
+  return enrichTransaction({
     id: `imp-${Date.now()}-${Math.floor(Math.random() * 100000)}`,
     memberId: previewItem.memberId,
     type: previewItem.type,
@@ -563,11 +561,15 @@ function buildImportedTransaction(previewItem) {
     month: previewItem.month,
     date: previewItem.date,
     dueDate: previewItem.dueDate,
-    term: previewItem.type === 'expense' ? classifyTerm(previewItem.dueDate || previewItem.date) : null,
-    isInvestmentReserve: previewItem.type === 'expense' ? previewItem.category === 'Reserva para investir' : false,
+    bankKey: previewItem.bankKey,
+    bankName: previewItem.bankName,
+    accountId: previewItem.accountId,
+    accountLabel: previewItem.accountLabel,
+    sourceFileName: previewItem.sourceFileName,
+    referencePeriod: previewItem.referencePeriod,
     importFingerprint: previewItem.fingerprint,
-    importSource: 'manual-file'
-  };
+    importOrigin: previewItem.origin || 'manual-file'
+  });
 }
 
 function persistFinanceSnapshot(reason, extra = {}) {
@@ -599,18 +601,31 @@ app.get('/api/persistence/info', (_req, res) => {
   res.json({ repository: financeRepository.describe() });
 });
 
+app.get('/api/banks', (_req, res) => {
+  res.json({ banks: listAvailableBanks(transactions) });
+});
+
 app.get('/api/months', (req, res) => {
-  const filtered = filterTransactions({ member: req.query.member || 'all' });
+  const filtered = filterTransactions({ member: req.query.member || 'all', bank: req.query.bank || 'all', accountId: req.query.accountId || 'all' });
   res.json({ months: getAvailableMonths(filtered) });
+});
+
+app.get('/api/accounts', (_req, res) => {
+  res.json({ accounts: listAvailableAccounts(transactions) });
 });
 
 app.get('/api/transactions', (req, res) => {
   const filtered = filterTransactions({
     month: req.query.month,
     member: req.query.member || 'all',
+    bank: req.query.bank || 'all',
+    accountId: req.query.accountId || 'all',
+    type: req.query.type || 'all',
+    category: req.query.category || 'all',
     from: req.query.from,
     to: req.query.to,
-    term: req.query.term || 'all'
+    term: req.query.term || 'all',
+    search: req.query.search || ''
   });
   const ordered = [...filtered].sort((a, b) => new Date(b.date) - new Date(a.date));
   res.json({ transactions: ordered });
@@ -626,12 +641,7 @@ app.delete('/api/transactions', (_req, res) => {
 
 app.post('/api/transactions/seed', (_req, res) => {
   const resetState = financeRepository.resetSnapshot(defaultFinanceState);
-  transactions = resetState.transactions.map((item) => ({
-    ...item,
-    memberId: normalizeMemberId(item.memberId),
-    term: item.type === 'expense' ? classifyTerm(item.dueDate || item.date) : null,
-    isInvestmentReserve: Boolean(item.isInvestmentReserve || item.category === 'Reserva para investir')
-  }));
+  transactions = resetState.transactions.map((item) => enrichTransaction(item));
   importHistory = resetState.importHistory;
   seedInvestmentsFromTransactions();
   console.info('[imports] sample data restored', { transactions: transactions.length });
@@ -644,7 +654,7 @@ app.get('/api/imports/history', (_req, res) => {
 
 app.post('/api/imports/preview', (req, res) => {
   try {
-    const { fileName, content, importType = 'transaction', memberId, month } = req.body;
+    const { fileName, content, importType = 'transaction', memberId, month, bankKey, accountId, accountLabel, referencePeriod } = req.body;
     const normalizedMemberId = normalizeMemberId(memberId);
 
     if (!validateMember(normalizedMemberId)) {
@@ -664,7 +674,11 @@ app.post('/api/imports/preview', (req, res) => {
       content,
       importType,
       memberId: normalizedMemberId,
-      fallbackMonth: isValidMonth(month || '') ? month : new Date().toISOString().slice(0, 7)
+      fallbackMonth: isValidMonth(month || '') ? month : new Date().toISOString().slice(0, 7),
+      bankKeyHint: bankKey,
+      accountIdHint: accountId,
+      accountLabelHint: accountLabel,
+      referencePeriod
     });
 
     return res.json({
@@ -672,6 +686,7 @@ app.post('/api/imports/preview', (req, res) => {
       format: preview.format,
       importType,
       memberId: normalizedMemberId,
+      bank: preview.importer,
       rows: preview.rows,
       summary: {
         totalRows: preview.rows.length,
@@ -685,7 +700,7 @@ app.post('/api/imports/preview', (req, res) => {
 
 app.post('/api/imports/commit', (req, res) => {
   try {
-    const { fileName, content, importType = 'transaction', memberId, month } = req.body;
+    const { fileName, content, importType = 'transaction', memberId, month, bankKey, accountId, accountLabel, referencePeriod } = req.body;
     const normalizedMemberId = normalizeMemberId(memberId);
 
     if (!validateMember(normalizedMemberId)) {
@@ -705,7 +720,11 @@ app.post('/api/imports/commit', (req, res) => {
       content,
       importType,
       memberId: normalizedMemberId,
-      fallbackMonth: isValidMonth(month || '') ? month : new Date().toISOString().slice(0, 7)
+      fallbackMonth: isValidMonth(month || '') ? month : new Date().toISOString().slice(0, 7),
+      bankKeyHint: bankKey,
+      accountIdHint: accountId,
+      accountLabelHint: accountLabel,
+      referencePeriod
     });
 
     let imported = 0;
@@ -732,6 +751,8 @@ app.post('/api/imports/commit', (req, res) => {
         format: preview.format,
         importType,
         memberId: normalizedMemberId,
+        bankKey: preview.importer.key,
+        bankName: preview.importer.label,
         importedRows: imported,
         duplicateRows: duplicates,
         importedMonths: [...importedMonths].sort(),
@@ -767,7 +788,11 @@ app.post('/api/transactions', (req, res) => {
     month,
     date,
     dueDate,
-    isInvestmentReserve
+    isInvestmentReserve,
+    bankKey,
+    accountId,
+    accountLabel,
+    referencePeriod
   } = req.body;
 
   const normalizedMemberId = normalizeMemberId(memberId);
@@ -804,7 +829,7 @@ app.post('/api/transactions', (req, res) => {
   const safeDate = date || `${month}-01`;
   const safeDueDate = dueDate || safeDate;
 
-  const transaction = {
+  const transaction = enrichTransaction({
     id: `t${Date.now()}`,
     memberId: normalizedMemberId,
     type,
@@ -814,9 +839,13 @@ app.post('/api/transactions', (req, res) => {
     month: isValidMonth(month) ? month : getMonthFromDate(safeDate),
     date: safeDate,
     dueDate: safeDueDate,
-    term: type === 'expense' ? classifyTerm(safeDueDate) : null,
-    isInvestmentReserve: type === 'expense' ? Boolean(isInvestmentReserve || category === 'Reserva para investir') : false
-  };
+    isInvestmentReserve: type === 'expense' ? Boolean(isInvestmentReserve || category === 'Reserva para investir') : false,
+    bankKey,
+    accountId,
+    accountLabel,
+    referencePeriod,
+    importOrigin: 'manual-entry'
+  });
 
   transactions = [transaction, ...transactions];
   upsertInvestmentFromReserve(transaction);
@@ -828,14 +857,11 @@ app.patch('/api/transactions/:id', (req, res) => {
   const target = transactions.find((item) => item.id === req.params.id);
   if (!target) return res.status(404).json({ message: 'Lançamento não encontrado.' });
 
-  const next = {
+  const next = enrichTransaction({
     ...target,
     ...req.body,
     memberId: normalizeMemberId(req.body.memberId || target.memberId)
-  };
-
-  next.term = next.type === 'expense' ? classifyTerm(next.dueDate || next.date) : null;
-  next.isInvestmentReserve = next.type === 'expense' ? Boolean(next.isInvestmentReserve || next.category === 'Reserva para investir') : false;
+  });
 
   transactions = transactions.map((item) => (item.id === target.id ? next : item));
   upsertInvestmentFromReserve(next);
@@ -856,6 +882,11 @@ app.get('/api/dashboard', (req, res) => {
   res.json(buildDashboard({
     month: req.query.month,
     member: req.query.member || 'all',
+    bank: req.query.bank || 'all',
+    accountId: req.query.accountId || 'all',
+    type: req.query.type || 'all',
+    category: req.query.category || 'all',
+    search: req.query.search || '',
     from: req.query.from,
     to: req.query.to,
     term: req.query.term || 'all'
@@ -866,6 +897,11 @@ app.get('/api/suggestions', (req, res) => {
   const dashboard = buildDashboard({
     month: req.query.month,
     member: req.query.member || 'all',
+    bank: req.query.bank || 'all',
+    accountId: req.query.accountId || 'all',
+    type: req.query.type || 'all',
+    category: req.query.category || 'all',
+    search: req.query.search || '',
     from: req.query.from,
     to: req.query.to,
     term: req.query.term || 'all'
@@ -886,8 +922,12 @@ app.get('/api/investments', (req, res) => {
   const member = req.query.member || 'all';
   const from = req.query.from;
   const to = req.query.to;
+  const bank = req.query.bank || 'all';
+  const accountId = req.query.accountId || 'all';
   const filtered = investments.filter((item) => {
     if (!isMemberMatch(item, member)) return false;
+    if (bank !== 'all' && item.bankKey !== bank) return false;
+    if (accountId !== 'all' && item.accountId !== accountId) return false;
     return inPeriod({ date: item.date }, from, to);
   });
 

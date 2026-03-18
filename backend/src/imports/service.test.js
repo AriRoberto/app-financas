@@ -17,7 +17,7 @@ test('parseImportContent rejeita OFX nesta primeira entrega', () => {
   );
 });
 
-test('previewImportRows normaliza CSV com datas e valores BR', () => {
+test('previewImportRows normaliza CSV BB com metadados bancários', () => {
   const result = previewImportRows({
     fileName: 'extrato.csv',
     content: 'data,descricao,valor,categoria\n18/03/2026,Supermercado,"1.234,56",Mercado',
@@ -27,19 +27,15 @@ test('previewImportRows normaliza CSV com datas e valores BR', () => {
   });
 
   assert.equal(result.format, 'csv');
+  assert.equal(result.importer.key, 'BB');
   assert.equal(result.rows.length, 1);
-  assert.deepEqual(result.rows[0], {
-    importType: 'expense',
-    memberId: 'wife',
-    type: 'expense',
-    category: 'Mercado',
-    description: 'Supermercado',
-    amount: 1234.56,
-    date: '2026-03-18',
-    month: '2026-03',
-    dueDate: '2026-03-01',
-    fingerprint: result.rows[0].fingerprint
-  });
+  assert.equal(result.rows[0].type, 'expense');
+  assert.equal(result.rows[0].category, 'Mercado');
+  assert.equal(result.rows[0].description, 'Supermercado');
+  assert.equal(result.rows[0].amount, 1234.56);
+  assert.equal(result.rows[0].date, '2026-03-18');
+  assert.equal(result.rows[0].bankKey, 'BB');
+  assert.equal(result.rows[0].accountLabel, 'Conta Banco do Brasil');
   assert.match(result.rows[0].fingerprint, /^[a-f0-9]{64}$/);
 });
 
@@ -100,6 +96,23 @@ test('previewImportRows ignora linha de saldo anterior com valor zero', () => {
   assert.equal(result.rows[0].description, 'BB Rende Fácil');
   assert.equal(result.rows[0].amount, 95.53);
   assert.equal(result.rows[0].type, 'income');
+});
+
+test('previewImportRows suporta CSV do Itaú com agência/conta e hint automático do banco', () => {
+  const result = previewImportRows({
+    fileName: 'extrato-itau.csv',
+    content: 'Data,Descrição lançamento,Valor R$,Tipo,Agência,Conta corrente\n18/03/2026,Pix recebido,"2.500,00",Entrada,1234,56789-0\n19/03/2026,Compra mercado,"-230,45",Saída,1234,56789-0',
+    importType: 'transaction',
+    memberId: 'wife',
+    fallbackMonth: '2026-03'
+  });
+
+  assert.equal(result.importer.key, 'ITAU');
+  assert.equal(result.rows.length, 2);
+  assert.equal(result.rows[0].bankName, 'Itaú');
+  assert.equal(result.rows[0].accountId, '1234-56789-0');
+  assert.equal(result.rows[0].type, 'income');
+  assert.equal(result.rows[1].type, 'expense');
 });
 
 test('previewImportRows usa fallback quando conteúdo colado não tem filename', () => {

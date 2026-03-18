@@ -1,4 +1,5 @@
 const currency = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+const dateFormatter = new Intl.DateTimeFormat('pt-BR');
 
 const defaultTransactionForm = {
   memberId: 'husband',
@@ -9,6 +10,10 @@ const defaultTransactionForm = {
   month: new Date().toISOString().slice(0, 7),
   date: '',
   dueDate: '',
+  bankKey: 'MANUAL',
+  accountId: '',
+  accountLabel: '',
+  referencePeriod: new Date().toISOString().slice(0, 7),
   isInvestmentReserve: false
 };
 
@@ -16,9 +21,21 @@ const defaultImportForm = {
   memberId: 'husband',
   importType: 'transaction',
   month: new Date().toISOString().slice(0, 7),
+  bankKey: 'AUTO',
+  accountId: '',
+  accountLabel: '',
+  referencePeriod: new Date().toISOString().slice(0, 7),
   fileName: '',
   content: ''
 };
+
+function esc(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
+}
 
 function memberLabel(memberId) {
   return {
@@ -33,24 +50,9 @@ function typeLabel(type) {
   return {
     income: 'Receita',
     expense: 'Despesa',
-    investment: 'Investimento'
+    investment: 'Investimento',
+    transaction: 'Transação'
   }[type] || type;
-}
-
-function termLabel(term) {
-  return {
-    short: 'Curto prazo',
-    medium: 'Médio prazo',
-    long: 'Longo prazo'
-  }[term] || '-';
-}
-
-function esc(value) {
-  return String(value ?? '')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;');
 }
 
 async function parseJson(response) {
@@ -63,7 +65,6 @@ async function parseJson(response) {
 
 async function readImportFile(file) {
   const buffer = await file.arrayBuffer();
-
   try {
     return new TextDecoder('utf-8', { fatal: true }).decode(buffer);
   } catch {
@@ -71,10 +72,41 @@ async function readImportFile(file) {
   }
 }
 
+function buildPieSegments(items) {
+  const total = items.reduce((sum, item) => sum + item.amount, 0) || 1;
+  let current = 0;
+  return items.map((item, index) => {
+    const ratio = item.amount / total;
+    const start = current;
+    const end = current + ratio;
+    current = end;
+    return {
+      ...item,
+      color: ['#2563eb', '#7c3aed', '#ea580c', '#059669', '#dc2626', '#0891b2', '#ca8a04', '#4f46e5'][index % 8],
+      startAngle: start * Math.PI * 2 - Math.PI / 2,
+      endAngle: end * Math.PI * 2 - Math.PI / 2,
+      percentage: Number((ratio * 100).toFixed(1))
+    };
+  });
+}
+
+function describeArc(cx, cy, radius, startAngle, endAngle) {
+  const start = {
+    x: cx + radius * Math.cos(startAngle),
+    y: cy + radius * Math.sin(startAngle)
+  };
+  const end = {
+    x: cx + radius * Math.cos(endAngle),
+    y: cy + radius * Math.sin(endAngle)
+  };
+  const largeArcFlag = endAngle - startAngle > Math.PI ? 1 : 0;
+  return `M ${cx} ${cy} L ${start.x} ${start.y} A ${radius} ${radius} 0 ${largeArcFlag} 1 ${end.x} ${end.y} Z`;
+}
+
 export function createApp({ root, apiUrl }) {
   const state = {
     loading: true,
-    busy: false,
+    sectionLoading: '',
     error: '',
     success: '',
     members: [],
@@ -82,28 +114,32 @@ export function createApp({ root, apiUrl }) {
     incomeCategories: [],
     investmentCategories: [],
     months: [],
-    selectedMember: 'all',
-    selectedMonth: new Date().toISOString().slice(0, 7),
+    banks: [],
+    accounts: [],
     dashboard: null,
     transactions: [],
     investments: { total: 0, investments: [] },
     recoveryPlan: null,
-    bankInstitutions: [],
-    bankInstitution: 'BB',
-    bankConnections: [],
     importHistory: [],
     importPreview: null,
+    expandedTransactionId: '',
+    selectedChartCategory: '',
     transactionForm: { ...defaultTransactionForm },
-    importForm: { ...defaultImportForm }
+    importForm: { ...defaultImportForm },
+    filters: {
+      member: 'all',
+      bank: 'all',
+      accountId: 'all',
+      month: new Date().toISOString().slice(0, 7),
+      from: '',
+      to: '',
+      type: 'all',
+      category: 'all',
+      search: ''
+    }
   };
 
-  function currentCategoryOptions() {
-    if (state.transactionForm.type === 'income') return state.incomeCategories;
-    if (state.transactionForm.type === 'investment') return state.investmentCategories;
-    return state.expenseCategories;
-  }
-
-  function setMessage(type, message) {
+  function setBanner(type, message) {
     if (type === 'error') {
       state.error = message;
       state.success = '';
@@ -122,242 +158,361 @@ export function createApp({ root, apiUrl }) {
     }));
   }
 
+  function currentTransactionCategories() {
+    if (state.transactionForm.type === 'income') return state.incomeCategories;
+    if (state.transactionForm.type === 'investment') return state.investmentCategories;
+    return state.expenseCategories;
+  }
+
+  function allCategories() {
+    return [...state.expenseCategories, ...state.incomeCategories, ...state.investmentCategories];
+  }
+
+  function buildDashboardParams() {
+    const params = new URLSearchParams({
+      member: state.filters.member,
+      bank: state.filters.bank,
+      accountId: state.filters.accountId,
+      type: state.filters.type,
+      category: state.selectedChartCategory || state.filters.category,
+      search: state.filters.search
+    });
+
+    if (state.filters.month) {
+      params.set('month', state.filters.month);
+      params.set('from', state.filters.from || `${state.filters.month}-01`);
+      params.set('to', state.filters.to || `${state.filters.month}-31`);
+    } else {
+      if (state.filters.from) params.set('from', state.filters.from);
+      if (state.filters.to) params.set('to', state.filters.to);
+    }
+
+    return params.toString();
+  }
+
   async function loadStaticData() {
-    const [membersData, categoriesData, institutionsData] = await Promise.all([
+    const [membersData, categoriesData, monthsData, banksData, accountsData] = await Promise.all([
       request('/api/members'),
       request('/api/categories'),
-      request('/api/banks/institutions')
+      request('/api/months?member=all'),
+      request('/api/banks'),
+      request('/api/accounts')
     ]);
 
     state.members = membersData.members || [];
     state.expenseCategories = categoriesData.expenseCategories || [];
     state.incomeCategories = categoriesData.incomeCategories || [];
     state.investmentCategories = categoriesData.investmentCategories || [];
-    state.bankInstitutions = institutionsData.institutions || [];
+    state.months = monthsData.months || [];
+    state.banks = [{ key: 'all', name: 'Todos os bancos' }, ...(banksData.banks || [])];
+    state.accounts = [{ id: 'all', label: 'Todas as contas' }, ...(accountsData.accounts || [])];
 
     const firstMember = state.members[0]?.id || 'husband';
+    const firstMonth = state.months[state.months.length - 1] || state.filters.month;
+
+    state.filters.month = firstMonth;
     state.transactionForm.memberId = firstMember;
+    state.transactionForm.category = currentTransactionCategories()[0] || '';
     state.importForm.memberId = firstMember;
-    state.transactionForm.category = currentCategoryOptions()[0] || '';
-    state.bankInstitution = state.bankInstitutions[0]?.key || state.bankInstitution;
+    state.transactionForm.referencePeriod = firstMonth;
+    state.importForm.referencePeriod = firstMonth;
+    state.importForm.month = firstMonth;
   }
 
-  async function loadDynamicData() {
-    const member = state.selectedMember || 'all';
-    const month = state.selectedMonth;
-    const monthParams = new URLSearchParams({ member, month, from: `${month}-01`, to: `${month}-31` });
-    const investmentsParams = new URLSearchParams({ member, from: `${month}-01`, to: `${month}-31` });
-
-    const [dashboardData, transactionsData, monthsData, investmentsData, recoveryData, connectionsData, importsData] = await Promise.all([
-      request(`/api/dashboard?${monthParams}`),
-      request(`/api/transactions?${monthParams}`),
-      request(`/api/months?member=${member}`),
-      request(`/api/investments?${investmentsParams}`),
-      request(`/api/recovery/plan?${monthParams}`),
-      request('/api/banks/connections'),
+  async function loadDashboardData() {
+    const query = buildDashboardParams();
+    const [dashboard, transactions, investments, recoveryPlan, importHistory] = await Promise.all([
+      request(`/api/dashboard?${query}`),
+      request(`/api/transactions?${query}`),
+      request(`/api/investments?${query}`),
+      request(`/api/recovery/plan?${query}`),
       request('/api/imports/history')
     ]);
 
-    state.dashboard = dashboardData;
-    state.transactions = transactionsData.transactions || [];
-    state.months = monthsData.months || [];
-    state.investments = investmentsData;
-    state.recoveryPlan = recoveryData;
-    state.bankConnections = connectionsData.connections || [];
-    state.importHistory = importsData.imports || [];
+    state.dashboard = dashboard;
+    state.transactions = transactions.transactions || [];
+    state.investments = investments;
+    state.recoveryPlan = recoveryPlan;
+    state.importHistory = importHistory.imports || [];
 
-    if (!state.months.includes(state.selectedMonth) && state.months[0]) {
-      state.selectedMonth = state.months[state.months.length - 1];
-    }
-  }
-
-  async function refreshData() {
-    state.loading = true;
-    render();
-    try {
-      await loadDynamicData();
-      state.loading = false;
-      render();
-    } catch (error) {
-      state.loading = false;
-      setMessage('error', error.message);
-    }
+    const dynamicBanks = [{ key: 'all', name: 'Todos os bancos' }, ...((dashboard.byBank || []).map((item) => ({ key: item.id, name: item.label })))];
+    const dynamicAccounts = [{ id: 'all', label: 'Todas as contas' }, ...((dashboard.byAccount || []).map((item) => ({ id: item.id, label: item.label })))];
+    state.banks = dynamicBanks;
+    state.accounts = dynamicAccounts;
   }
 
   async function boot() {
     try {
       await loadStaticData();
-      await loadDynamicData();
+      await loadDashboardData();
       state.loading = false;
       render();
     } catch (error) {
       state.loading = false;
-      setMessage('error', error.message);
+      setBanner('error', error.message);
     }
   }
 
-  async function runBusy(task, successMessage) {
-    state.busy = true;
+  async function runAction(section, task, successMessage) {
+    state.sectionLoading = section;
     render();
     try {
       const result = await task();
-      if (successMessage) {
-        setMessage('success', successMessage);
-      }
-      await loadDynamicData();
-      state.busy = false;
+      await loadDashboardData();
+      state.sectionLoading = '';
+      if (successMessage) setBanner('success', successMessage);
       render();
       return result;
     } catch (error) {
-      state.busy = false;
-      setMessage('error', error.message);
+      state.sectionLoading = '';
+      setBanner('error', error.message);
       throw error;
     }
   }
 
-  function transactionPayload() {
-    return {
-      ...state.transactionForm,
-      amount: Number(state.transactionForm.amount)
-    };
-  }
-
-  function renderSummaryCards() {
+  function renderSummary() {
     const dashboard = state.dashboard || {};
     return `
-      <section class="card-grid">
-        <article class="card stat-card">
-          <span class="muted">Receitas</span>
+      <section class="summary-grid">
+        <article class="card metric-card income">
+          <span>Receitas</span>
           <strong>${currency.format(dashboard.income || 0)}</strong>
+          <small>${dashboard.transactionCount || 0} lançamento(s) filtrados</small>
         </article>
-        <article class="card stat-card">
-          <span class="muted">Despesas</span>
+        <article class="card metric-card expense">
+          <span>Despesas</span>
           <strong>${currency.format(dashboard.expenses || 0)}</strong>
+          <small>Inclui saídas importadas e lançamentos manuais</small>
         </article>
-        <article class="card stat-card">
-          <span class="muted">Investimentos</span>
+        <article class="card metric-card investment">
+          <span>Investimentos</span>
           <strong>${currency.format(dashboard.investments || 0)}</strong>
+          <small>Diretos + reservas espelhadas</small>
         </article>
-        <article class="card stat-card ${dashboard.balance >= 0 ? 'positive' : 'negative'}">
-          <span class="muted">Saldo</span>
+        <article class="card metric-card balance ${dashboard.balance >= 0 ? 'positive' : 'negative'}">
+          <span>Saldo</span>
           <strong>${currency.format(dashboard.balance || 0)}</strong>
+          <small>${dashboard.empty ? 'Sem dados no período.' : 'Saldo considerando os filtros ativos.'}</small>
         </article>
       </section>
     `;
   }
 
-  function renderOptions(items, selectedValue, formatter) {
-    return items.map((item) => {
-      const value = typeof item === 'string' ? item : item.id || item.key || item.value;
-      const label = formatter ? formatter(item) : (typeof item === 'string' ? item : item.name || item.label || value);
-      return `<option value="${esc(value)}" ${String(value) === String(selectedValue) ? 'selected' : ''}>${esc(label)}</option>`;
-    }).join('');
+  function renderSelectOptions(items, selected, keyField, labelField) {
+    return items.map((item) => `<option value="${esc(item[keyField])}" ${String(item[keyField]) === String(selected) ? 'selected' : ''}>${esc(item[labelField])}</option>`).join('');
+  }
+
+  function renderFilters() {
+    return `
+      <section class="card filters-panel">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Filtros</p>
+            <h2>Visão consolidada por membro, banco e conta</h2>
+          </div>
+          <button data-action="refresh-dashboard">${state.sectionLoading === 'refresh' ? 'Atualizando...' : 'Atualizar dashboards'}</button>
+        </div>
+        <div class="filters-grid">
+          <label><span>Membro</span><select name="filter-member">${renderSelectOptions([{ id: 'all', name: 'Todos os membros' }, ...state.members], state.filters.member, 'id', 'name')}</select></label>
+          <label><span>Banco</span><select name="filter-bank">${renderSelectOptions(state.banks, state.filters.bank, 'key', 'name')}</select></label>
+          <label><span>Conta</span><select name="filter-accountId">${renderSelectOptions(state.accounts, state.filters.accountId, 'id', 'label')}</select></label>
+          <label><span>Mês</span><select name="filter-month"><option value="">Período livre</option>${state.months.map((month) => `<option value="${month}" ${month === state.filters.month ? 'selected' : ''}>${month}</option>`).join('')}</select></label>
+          <label><span>De</span><input name="filter-from" type="date" value="${esc(state.filters.from)}" /></label>
+          <label><span>Até</span><input name="filter-to" type="date" value="${esc(state.filters.to)}" /></label>
+          <label><span>Tipo</span><select name="filter-type"><option value="all">Todos</option><option value="expense" ${state.filters.type === 'expense' ? 'selected' : ''}>Despesa</option><option value="income" ${state.filters.type === 'income' ? 'selected' : ''}>Receita</option><option value="investment" ${state.filters.type === 'investment' ? 'selected' : ''}>Investimento</option></select></label>
+          <label><span>Categoria</span><select name="filter-category"><option value="all">Todas</option>${allCategories().map((category) => `<option value="${esc(category)}" ${category === state.filters.category ? 'selected' : ''}>${esc(category)}</option>`).join('')}</select></label>
+          <label class="span-2"><span>Buscar</span><input name="filter-search" placeholder="Descrição, conta, banco..." value="${esc(state.filters.search)}" /></label>
+        </div>
+      </section>
+    `;
+  }
+
+  function renderPieChart() {
+    const items = (state.dashboard?.categoryHighlights || []).filter((item) => item.amount > 0);
+    if (!items.length) {
+      return '<div class="empty-state boxed">Nenhuma categoria encontrada para os filtros atuais.</div>';
+    }
+
+    const segments = buildPieSegments(items);
+    return `
+      <div class="category-layout">
+        <div class="chart-wrap">
+          <svg viewBox="0 0 240 240" class="pie-chart" aria-label="Gráfico por categoria">
+            ${segments.map((segment) => `
+              <path
+                d="${describeArc(120, 120, state.selectedChartCategory === segment.label ? 96 : 88, segment.startAngle, segment.endAngle)}"
+                fill="${segment.color}"
+                class="pie-slice ${state.selectedChartCategory === segment.label ? 'active' : ''}"
+                data-action="toggle-category"
+                data-category="${esc(segment.label)}"
+              ></path>
+            `).join('')}
+            <circle cx="120" cy="120" r="46" fill="#fff"></circle>
+            <text x="120" y="112" text-anchor="middle" class="pie-total-label">Total</text>
+            <text x="120" y="134" text-anchor="middle" class="pie-total-value">${currency.format(items.reduce((sum, item) => sum + item.amount, 0))}</text>
+          </svg>
+        </div>
+        <div class="legend-list">
+          ${segments.map((segment) => `
+            <button class="legend-item ${state.selectedChartCategory === segment.label ? 'active' : ''}" data-action="toggle-category" data-category="${esc(segment.label)}">
+              <span class="legend-color" style="background:${segment.color}"></span>
+              <span>
+                <strong>${esc(segment.label)}</strong>
+                <small>${typeLabel(segment.type)} · ${segment.percentage}% · ${currency.format(segment.amount)}</small>
+              </span>
+            </button>
+          `).join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  function renderSummaryTables(title, rows) {
+    return `
+      <article class="card compact-card">
+        <h3>${title}</h3>
+        ${rows.length ? `
+          <ul class="stat-list">
+            ${rows.map((item) => `
+              <li>
+                <div>
+                  <strong>${esc(item.label)}</strong>
+                  <small>${item.transactionCount} lançamento(s)</small>
+                </div>
+                <div class="stat-values">
+                  <span>R ${item.income.toFixed(2)}</span>
+                  <span>D ${item.expenses.toFixed(2)}</span>
+                  <span>I ${item.investments.toFixed(2)}</span>
+                </div>
+              </li>
+            `).join('')}
+          </ul>
+        ` : '<p class="empty-state">Sem dados agregados.</p>'}
+      </article>
+    `;
+  }
+
+  function renderDashboards() {
+    return `
+      <section class="dashboard-grid">
+        <article class="card dashboard-card">
+          <div class="panel-heading compact">
+            <div>
+              <p class="eyebrow">Dashboard obrigatório</p>
+              <h2>Quadro e gráfico por categoria</h2>
+            </div>
+            ${state.selectedChartCategory ? `<button class="ghost-button" data-action="clear-category-filter">Limpar destaque</button>` : ''}
+          </div>
+          ${renderPieChart()}
+        </article>
+        ${renderSummaryTables('Resumo por banco', state.dashboard?.byBank || [])}
+        ${renderSummaryTables('Resumo por conta', state.dashboard?.byAccount || [])}
+        ${renderSummaryTables('Resumo por membro', state.dashboard?.byMember || [])}
+      </section>
+    `;
+  }
+
+  function renderRecoveryPlan() {
+    const plan = state.recoveryPlan;
+    if (!plan) return '<p class="empty-state">Plano de recuperação indisponível.</p>';
+    return `
+      <div class="stack-sm">
+        <div class="badge-row">
+          <span class="severity-pill">${esc(plan.severityLabel || '-')}</span>
+          <span class="muted">Reserva: ${esc(String(plan.metrics?.reservaMeses ?? 0))} meses</span>
+        </div>
+        <p>${esc(plan.summary || '')}</p>
+        <ul class="simple-list">
+          ${(plan.horizons?.short || []).map((action) => `<li><strong>${esc(action.title)}</strong> — ${esc(action.description)}</li>`).join('')}
+        </ul>
+      </div>
+    `;
   }
 
   function renderTransactions() {
     if (!state.transactions.length) {
-      return '<p class="empty-state">Nenhum lançamento encontrado para o filtro atual.</p>';
+      return '<div class="empty-state boxed">Nenhum lançamento encontrado. Ajuste os filtros ou importe novos dados.</div>';
     }
 
     return `
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Data</th>
-              <th>Membro</th>
-              <th>Tipo</th>
-              <th>Categoria</th>
-              <th>Descrição</th>
-              <th>Prazo</th>
-              <th>Valor</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            ${state.transactions.map((transaction) => `
-              <tr>
-                <td>${esc(transaction.date)}</td>
-                <td>${esc(memberLabel(transaction.memberId))}</td>
-                <td>${esc(typeLabel(transaction.type))}</td>
-                <td>${esc(transaction.category)}</td>
-                <td>${esc(transaction.description)}</td>
-                <td>${esc(termLabel(transaction.term))}</td>
-                <td>${currency.format(transaction.amount)}</td>
-                <td><button class="ghost-button" data-action="delete-transaction" data-id="${esc(transaction.id)}">Excluir</button></td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
+      <div class="transaction-list">
+        ${state.transactions.map((item) => `
+          <article class="transaction-card ${state.expandedTransactionId === item.id ? 'expanded' : ''}">
+            <button class="transaction-summary" data-action="toggle-transaction" data-id="${esc(item.id)}">
+              <div>
+                <strong>${esc(item.description)}</strong>
+                <span>${esc(typeLabel(item.type))} · ${esc(item.category)} · ${esc(item.date)}</span>
+              </div>
+              <div class="summary-right">
+                <span>${esc(memberLabel(item.memberId))}</span>
+                <strong>${currency.format(item.amount)}</strong>
+              </div>
+            </button>
+            ${state.expandedTransactionId === item.id ? `
+              <div class="transaction-details">
+                <dl>
+                  <div><dt>Banco</dt><dd>${esc(item.bankName || item.bankKey || '-')}</dd></div>
+                  <div><dt>Conta</dt><dd>${esc(item.accountLabel || item.accountId || '-')}</dd></div>
+                  <div><dt>Membro</dt><dd>${esc(memberLabel(item.memberId))}</dd></div>
+                  <div><dt>Categoria</dt><dd>${esc(item.category)}</dd></div>
+                  <div><dt>Tipo</dt><dd>${esc(typeLabel(item.type))}</dd></div>
+                  <div><dt>Origem</dt><dd>${esc(item.importOrigin || '-')}</dd></div>
+                  <div><dt>Arquivo</dt><dd>${esc(item.sourceFileName || '-')}</dd></div>
+                  <div><dt>Período</dt><dd>${esc(item.referencePeriod || '-')}</dd></div>
+                </dl>
+                <div class="inline-actions">
+                  <button class="ghost-button" data-action="delete-transaction" data-id="${esc(item.id)}">Excluir</button>
+                </div>
+              </div>
+            ` : ''}
+          </article>
+        `).join('')}
       </div>
     `;
   }
 
   function renderInvestments() {
-    const rows = state.investments?.investments || [];
+    const items = state.investments?.investments || [];
     return `
-      <div class="stack-sm">
-        <p><strong>Total investido:</strong> ${currency.format(state.investments?.total || 0)}</p>
-        ${rows.length ? `
-          <ul class="simple-list">
-            ${rows.map((item) => `<li>${esc(item.date)} · ${esc(memberLabel(item.memberId))} · ${currency.format(item.amount)} · ${esc(item.type)}</li>`).join('')}
-          </ul>
-        ` : '<p class="empty-state">Nenhum investimento encontrado.</p>'}
-      </div>
-    `;
-  }
-
-  function renderConnections() {
-    return `
-      <div class="stack-sm">
-        <div class="inline-form">
-          <select name="bankInstitution">${renderOptions(state.bankInstitutions, state.bankInstitution, (item) => item.name)}</select>
-          <button data-action="connect-bank">Conectar banco</button>
-        </div>
-        ${(state.bankConnections || []).length ? `
-          <ul class="simple-list">
-            ${state.bankConnections.map((connection) => `
-              <li>
-                <strong>${esc(connection.institution)}</strong> · ${esc(connection.status)}
-                <div class="inline-actions">
-                  <button class="ghost-button" data-action="sync-bank" data-id="${esc(connection.id)}">Sincronizar</button>
-                  <button class="ghost-button" data-action="revoke-bank" data-id="${esc(connection.id)}">Revogar</button>
-                </div>
-              </li>
-            `).join('')}
-          </ul>
-        ` : '<p class="empty-state">Nenhuma conexão bancária cadastrada.</p>'}
-      </div>
+      <article class="card compact-card">
+        <h3>Investimentos</h3>
+        <p><strong>Total:</strong> ${currency.format(state.investments?.total || 0)}</p>
+        ${items.length ? `<ul class="simple-list">${items.map((item) => `<li>${esc(item.bankName || item.bankKey || '-')} · ${esc(item.accountLabel || item.accountId || '-')} · ${currency.format(item.amount)}</li>`).join('')}</ul>` : '<p class="empty-state">Nenhum investimento para os filtros atuais.</p>'}
+      </article>
     `;
   }
 
   function renderImportPreview() {
     if (!state.importPreview) {
-      return '<p class="empty-state">Carregue um CSV/JSON para visualizar antes de importar.</p>';
+      return '<div class="empty-state boxed">Envie um CSV do BB ou do Itaú para gerar a pré-visualização.</div>';
     }
 
     return `
-      <div class="stack-sm">
-        <p><strong>Arquivo:</strong> ${esc(state.importPreview.fileName)} · <strong>Linhas:</strong> ${esc(state.importPreview.summary?.totalRows || 0)} · <strong>Duplicadas:</strong> ${esc(state.importPreview.summary?.duplicates || 0)}</p>
+      <div class="stack-sm import-preview">
+        <p><strong>Banco detectado:</strong> ${esc(state.importPreview.bank?.label || '-')} · <strong>Linhas válidas:</strong> ${esc(state.importPreview.summary?.totalRows || 0)} · <strong>Duplicadas:</strong> ${esc(state.importPreview.summary?.duplicates || 0)}</p>
         <div class="table-wrap">
           <table>
             <thead>
               <tr>
                 <th>Data</th>
+                <th>Banco</th>
+                <th>Conta</th>
                 <th>Descrição</th>
+                <th>Tipo</th>
                 <th>Categoria</th>
                 <th>Valor</th>
-                <th>Tipo</th>
               </tr>
             </thead>
             <tbody>
-              ${(state.importPreview.rows || []).slice(0, 10).map((row) => `
+              ${(state.importPreview.rows || []).slice(0, 20).map((row) => `
                 <tr>
                   <td>${esc(row.date)}</td>
+                  <td>${esc(row.bankName)}</td>
+                  <td>${esc(row.accountLabel)}</td>
                   <td>${esc(row.description)}</td>
-                  <td>${esc(row.category)}</td>
-                  <td>${currency.format(row.amount || 0)}</td>
                   <td>${esc(typeLabel(row.type))}</td>
+                  <td>${esc(row.category)}</td>
+                  <td>${currency.format(row.amount)}</td>
                 </tr>
               `).join('')}
             </tbody>
@@ -369,242 +524,218 @@ export function createApp({ root, apiUrl }) {
 
   function renderImportHistory() {
     if (!state.importHistory.length) {
-      return '<p class="empty-state">Nenhuma importação registrada.</p>';
+      return '<div class="empty-state boxed">Nenhuma importação registrada ainda.</div>';
     }
 
     return `
-      <ul class="simple-list">
+      <div class="history-list">
         ${state.importHistory.map((item) => `
-          <li>
-            <strong>${esc(item.fileName)}</strong> · ${esc(memberLabel(item.memberId))} · ${esc(item.importedRows)} importados / ${esc(item.duplicateRows)} duplicados
-            <br />
-            <span class="muted">Meses: ${esc((item.importedMonths || []).join(', ') || '-')} · ${esc(new Date(item.createdAt).toLocaleString('pt-BR'))}</span>
-          </li>
+          <article class="history-card">
+            <strong>${esc(item.fileName)}</strong>
+            <span>${esc(item.bankName || item.bankKey || '-')} · ${esc(memberLabel(item.memberId))}</span>
+            <span>${esc(item.accountLabel || item.accountId || '-')}</span>
+            <small>${esc((item.importedMonths || []).join(', ') || '-')} · ${esc(new Date(item.createdAt).toLocaleString('pt-BR'))}</small>
+            <small>${item.importedRows} importados / ${item.duplicateRows} duplicados</small>
+          </article>
         `).join('')}
-      </ul>
-    `;
-  }
-
-  function renderRecoveryPlan() {
-    const plan = state.recoveryPlan;
-    if (!plan) {
-      return '<p class="empty-state">Plano de recuperação indisponível.</p>';
-    }
-
-    const shortActions = plan.horizons?.short || [];
-
-    return `
-      <div class="stack-sm">
-        <p><strong>Severidade:</strong> ${esc(plan.severityLabel || '-')}</p>
-        <p>${esc(plan.summary || '')}</p>
-        <p><strong>Reserva:</strong> ${esc(String(plan.metrics?.reservaMeses ?? 0))} meses</p>
-        <p><strong>Saldo projetado:</strong> ${currency.format(plan.metrics?.saldoCaixaProjetado || 0)}</p>
-        ${shortActions.length ? `
-          <ul class="simple-list">
-            ${shortActions.map((action) => `<li><strong>${esc(action.title)}</strong> — ${esc(action.description)}</li>`).join('')}
-          </ul>
-        ` : ''}
       </div>
     `;
   }
 
-  function render() {
-    const monthOptions = state.months.length ? state.months : [state.selectedMonth];
-    const categoryOptions = currentCategoryOptions();
+  function renderForms() {
+    return `
+      <section class="workspace-grid">
+        <article class="card form-card">
+          <div class="panel-heading compact">
+            <div>
+              <p class="eyebrow">Lançamento manual</p>
+              <h2>Novo lançamento financeiro</h2>
+            </div>
+          </div>
+          <div class="form-grid">
+            <label><span>Membro</span><select name="tx-memberId">${renderSelectOptions(state.members, state.transactionForm.memberId, 'id', 'name')}</select></label>
+            <label><span>Banco</span><select name="tx-bankKey"><option value="MANUAL">Manual</option>${state.banks.filter((item) => item.key !== 'all').map((bank) => `<option value="${esc(bank.key)}" ${state.transactionForm.bankKey === bank.key ? 'selected' : ''}>${esc(bank.name)}</option>`).join('')}</select></label>
+            <label><span>Conta</span><input name="tx-accountLabel" value="${esc(state.transactionForm.accountLabel)}" placeholder="Ex.: Conta principal" /></label>
+            <label><span>Tipo</span><select name="tx-type"><option value="expense" ${state.transactionForm.type === 'expense' ? 'selected' : ''}>Despesa</option><option value="income" ${state.transactionForm.type === 'income' ? 'selected' : ''}>Receita</option><option value="investment" ${state.transactionForm.type === 'investment' ? 'selected' : ''}>Investimento</option></select></label>
+            <label><span>Categoria</span><select name="tx-category">${currentTransactionCategories().map((category) => `<option value="${esc(category)}" ${category === state.transactionForm.category ? 'selected' : ''}>${esc(category)}</option>`).join('')}</select></label>
+            <label><span>Descrição</span><input name="tx-description" value="${esc(state.transactionForm.description)}" /></label>
+            <label><span>Valor</span><input name="tx-amount" type="number" step="0.01" value="${esc(state.transactionForm.amount)}" /></label>
+            <label><span>Data</span><input name="tx-date" type="date" value="${esc(state.transactionForm.date)}" /></label>
+            <label><span>Mês</span><input name="tx-month" type="month" value="${esc(state.transactionForm.month)}" /></label>
+            <label><span>Período de referência</span><input name="tx-referencePeriod" type="month" value="${esc(state.transactionForm.referencePeriod)}" /></label>
+          </div>
+          <label class="checkbox-row"><input name="tx-isInvestmentReserve" type="checkbox" ${state.transactionForm.isInvestmentReserve ? 'checked' : ''} /> Reserva para investir</label>
+          <div class="inline-actions">
+            <button data-action="save-transaction">${state.sectionLoading === 'transaction' ? 'Salvando...' : 'Salvar lançamento'}</button>
+            <button class="ghost-button" data-action="seed-data">Restaurar dados de exemplo</button>
+            <button class="ghost-button danger" data-action="clear-data">Limpar base</button>
+          </div>
+        </article>
 
+        <article class="card form-card">
+          <div class="panel-heading compact">
+            <div>
+              <p class="eyebrow">Importação multi-banco</p>
+              <h2>BB e Itaú</h2>
+            </div>
+            <span class="muted">Fluxo: detectar banco → normalizar → associar membro/conta → persistir → recalcular dashboards.</span>
+          </div>
+          <div class="form-grid">
+            <label><span>Membro</span><select name="import-memberId">${renderSelectOptions(state.members, state.importForm.memberId, 'id', 'name')}</select></label>
+            <label><span>Banco</span><select name="import-bankKey"><option value="AUTO" ${state.importForm.bankKey === 'AUTO' ? 'selected' : ''}>Auto-detectar</option>${state.banks.filter((item) => item.key !== 'all').map((bank) => `<option value="${esc(bank.key)}" ${state.importForm.bankKey === bank.key ? 'selected' : ''}>${esc(bank.name)}</option>`).join('')}</select></label>
+            <label><span>Conta</span><input name="import-accountLabel" value="${esc(state.importForm.accountLabel)}" placeholder="Ex.: Itaú salário" /></label>
+            <label><span>Período</span><input name="import-referencePeriod" type="month" value="${esc(state.importForm.referencePeriod)}" /></label>
+            <label class="span-2"><span>Arquivo CSV</span><input name="import-file" type="file" accept=".csv,.json,.txt" /></label>
+            <label class="span-2"><span>Conteúdo</span><textarea name="import-content" rows="8">${esc(state.importForm.content)}</textarea></label>
+          </div>
+          <div class="inline-actions">
+            <button data-action="preview-import">${state.sectionLoading === 'preview-import' ? 'Processando...' : 'Pré-visualizar'}</button>
+            <button class="ghost-button" data-action="commit-import">${state.sectionLoading === 'commit-import' ? 'Importando...' : 'Importar e atualizar dashboards'}</button>
+          </div>
+          ${renderImportPreview()}
+        </article>
+      </section>
+    `;
+  }
+
+  function render() {
     root.innerHTML = `
-      <div class="app-shell">
+      <div class="app-shell wide">
         <header class="hero card">
           <div>
-            <p class="eyebrow">App Finanças</p>
+            <p class="eyebrow">Arquitetura multi-banco</p>
             <h1>Painel financeiro familiar</h1>
-            <p class="muted">Frontend estático compatível com Docker, consumindo a API local sem depender de React/Vite no runtime.</p>
+            <p class="muted">Base preparada para BB + Itaú, organização por membro/conta/banco, dashboards funcionais e interface pronta para demonstração.</p>
           </div>
-          <div class="hero-actions">
-            <button data-action="seed-data" ${state.busy ? 'disabled' : ''}>Restaurar dados de exemplo</button>
-            <button class="ghost-button" data-action="clear-data" ${state.busy ? 'disabled' : ''}>Limpar lançamentos</button>
+          <div class="hero-side">
+            <strong>${state.dashboard?.empty ? 'Sem dados nos filtros' : `${state.dashboard?.transactionCount || 0} lançamentos ativos`}</strong>
+            <small>Categoria destacada: ${esc(state.selectedChartCategory || 'nenhuma')}</small>
           </div>
         </header>
 
         ${state.error ? `<div class="banner error">${esc(state.error)}</div>` : ''}
         ${state.success ? `<div class="banner success">${esc(state.success)}</div>` : ''}
 
-        <section class="card filters">
-          <div>
-            <label>Membro</label>
-            <select name="selectedMember">${renderOptions([{ id: 'all', name: 'Todos' }, ...state.members], state.selectedMember, (item) => item.name || item.id)}</select>
-          </div>
-          <div>
-            <label>Mês</label>
-            <select name="selectedMonth">${renderOptions(monthOptions, state.selectedMonth)}</select>
-          </div>
-          <div class="filter-action">
-            <button data-action="refresh" ${state.busy ? 'disabled' : ''}>${state.loading ? 'Carregando...' : 'Atualizar painel'}</button>
-          </div>
-        </section>
-
-        ${renderSummaryCards()}
-
-        <section class="card-grid details-grid">
-          <article class="card">
-            <h2>Novo lançamento</h2>
-            <div class="form-grid">
-              <label><span>Membro</span><select name="tx-memberId">${renderOptions(state.members, state.transactionForm.memberId, (item) => item.name)}</select></label>
-              <label><span>Tipo</span><select name="tx-type">${renderOptions(['expense', 'income', 'investment'], state.transactionForm.type, typeLabel)}</select></label>
-              <label><span>Categoria</span><select name="tx-category">${renderOptions(categoryOptions, state.transactionForm.category)}</select></label>
-              <label><span>Descrição</span><input name="tx-description" value="${esc(state.transactionForm.description)}" /></label>
-              <label><span>Valor</span><input name="tx-amount" type="number" min="0" step="0.01" value="${esc(state.transactionForm.amount)}" /></label>
-              <label><span>Mês</span><input name="tx-month" type="month" value="${esc(state.transactionForm.month)}" /></label>
-              <label><span>Data</span><input name="tx-date" type="date" value="${esc(state.transactionForm.date)}" /></label>
-              <label><span>Vencimento</span><input name="tx-dueDate" type="date" value="${esc(state.transactionForm.dueDate)}" /></label>
-            </div>
-            <label class="checkbox-row"><input name="tx-isInvestmentReserve" type="checkbox" ${state.transactionForm.isInvestmentReserve ? 'checked' : ''} /> Reserva para investir</label>
-            <button data-action="save-transaction" ${state.busy ? 'disabled' : ''}>Salvar lançamento</button>
-          </article>
-
-          <article class="card">
-            <h2>Plano de recuperação</h2>
-            ${renderRecoveryPlan()}
-          </article>
-        </section>
-
-        <section class="card">
-          <h2>Lançamentos</h2>
-          ${renderTransactions()}
-        </section>
-
-        <section class="card-grid details-grid">
-          <article class="card">
-            <h2>Investimentos</h2>
-            ${renderInvestments()}
-          </article>
-          <article class="card">
-            <h2>Open Finance</h2>
-            ${renderConnections()}
-          </article>
-        </section>
-
-        <section class="card-grid details-grid">
-          <article class="card">
-            <h2>Importação manual</h2>
-            <div class="form-grid">
-              <label><span>Membro</span><select name="import-memberId">${renderOptions(state.members, state.importForm.memberId, (item) => item.name)}</select></label>
-              <label><span>Tipo</span><select name="import-importType">${renderOptions(['transaction'], state.importForm.importType)}</select></label>
-              <label><span>Mês fallback</span><input name="import-month" type="month" value="${esc(state.importForm.month)}" /></label>
-              <label class="full-width"><span>Arquivo</span><input name="import-file" type="file" accept=".csv,.json,.txt" /></label>
-              <label class="full-width"><span>Conteúdo</span><textarea name="import-content" rows="8">${esc(state.importForm.content)}</textarea></label>
-            </div>
-            <div class="inline-actions">
-              <button data-action="preview-import" ${state.busy ? 'disabled' : ''}>Pré-visualizar</button>
-              <button class="ghost-button" data-action="commit-import" ${state.busy ? 'disabled' : ''}>Importar</button>
-            </div>
-            ${renderImportPreview()}
-          </article>
-          <article class="card">
-            <h2>Histórico de importações</h2>
-            ${renderImportHistory()}
-          </article>
-        </section>
+        ${state.loading ? '<div class="card loading-card">Carregando estrutura do app...</div>' : `
+          ${renderFilters()}
+          ${renderSummary()}
+          ${renderDashboards()}
+          <section class="workspace-grid secondary">
+            <article class="card">
+              <div class="panel-heading compact"><div><p class="eyebrow">Lançamentos</p><h2>Lista com expand/collapse</h2></div></div>
+              ${renderTransactions()}
+            </article>
+            <article class="card compact-side">
+              <div class="panel-heading compact"><div><p class="eyebrow">Análises auxiliares</p><h2>Investimentos e recuperação</h2></div></div>
+              ${renderInvestments()}
+              <article class="card inner-card"><h3>Plano de recuperação</h3>${renderRecoveryPlan()}</article>
+            </article>
+          </section>
+          ${renderForms()}
+          <section class="workspace-grid secondary">
+            <article class="card"><div class="panel-heading compact"><div><p class="eyebrow">Histórico</p><h2>Importações realizadas</h2></div></div>${renderImportHistory()}</article>
+          </section>
+        `}
       </div>
     `;
-
     bindEvents();
   }
 
+  function updateFilter(name, value) {
+    state.filters[name] = value;
+    if (name === 'month' && value) {
+      state.filters.from = '';
+      state.filters.to = '';
+    }
+  }
+
   async function handleAction(action, element) {
-    if (state.busy && action !== 'refresh') return;
-
-    if (action === 'refresh') {
-      await refreshData();
+    if (action === 'refresh-dashboard') {
+      await runAction('refresh', () => loadDashboardData());
       return;
     }
-
+    if (action === 'clear-category-filter') {
+      state.selectedChartCategory = '';
+      await runAction('refresh', () => loadDashboardData());
+      return;
+    }
+    if (action === 'toggle-category') {
+      state.selectedChartCategory = state.selectedChartCategory === element.dataset.category ? '' : element.dataset.category;
+      await runAction('refresh', () => loadDashboardData());
+      return;
+    }
+    if (action === 'toggle-transaction') {
+      state.expandedTransactionId = state.expandedTransactionId === element.dataset.id ? '' : element.dataset.id;
+      render();
+      return;
+    }
+    if (action === 'delete-transaction') {
+      await runAction('transaction', () => request(`/api/transactions/${element.dataset.id}`, { method: 'DELETE' }), 'Lançamento removido com sucesso.');
+      return;
+    }
     if (action === 'seed-data') {
-      await runBusy(() => request('/api/transactions/seed', { method: 'POST', body: '{}' }), 'Dados de exemplo restaurados.');
+      await runAction('seed', () => request('/api/transactions/seed', { method: 'POST', body: '{}' }), 'Dados de exemplo restaurados.');
       return;
     }
-
     if (action === 'clear-data') {
-      await runBusy(() => request('/api/transactions', { method: 'DELETE' }), 'Todos os lançamentos foram removidos.');
+      await runAction('clear', () => request('/api/transactions', { method: 'DELETE' }), 'Base limpa com sucesso.');
       state.importPreview = null;
       return;
     }
-
     if (action === 'save-transaction') {
-      await runBusy(() => request('/api/transactions', { method: 'POST', body: JSON.stringify(transactionPayload()) }), 'Lançamento salvo com sucesso.');
-      state.transactionForm = { ...defaultTransactionForm, memberId: state.transactionForm.memberId, category: currentCategoryOptions()[0] || '', month: state.selectedMonth };
+      const payload = {
+        ...state.transactionForm,
+        amount: Number(state.transactionForm.amount),
+        accountId: state.transactionForm.accountId || `${state.transactionForm.bankKey.toLowerCase()}-${state.transactionForm.memberId}-manual`
+      };
+      await runAction('transaction', () => request('/api/transactions', { method: 'POST', body: JSON.stringify(payload) }), 'Lançamento salvo com sucesso.');
+      state.transactionForm = { ...defaultTransactionForm, memberId: state.transactionForm.memberId, month: state.filters.month || defaultTransactionForm.month, referencePeriod: state.filters.month || defaultTransactionForm.referencePeriod, category: currentTransactionCategories()[0] || '' };
       return;
     }
-
-    if (action === 'delete-transaction') {
-      await runBusy(() => request(`/api/transactions/${element.dataset.id}`, { method: 'DELETE' }), 'Lançamento removido com sucesso.');
-      return;
-    }
-
-    if (action === 'connect-bank') {
-      const payload = { institution_key: state.bankInstitution, member: state.transactionForm.memberId };
-      const data = await runBusy(() => request('/api/banks/connect', { method: 'POST', body: JSON.stringify(payload) }), 'Conexão bancária iniciada.');
-      if (data.redirectUrl) {
-        setMessage('success', `Conexão iniciada. Abra manualmente a URL de callback/mock se necessário: ${data.redirectUrl}`);
-      }
-      return;
-    }
-
-    if (action === 'sync-bank') {
-      await runBusy(() => request(`/api/banks/${element.dataset.id}/sync`, { method: 'POST', body: '{}' }), 'Sincronização concluída.');
-      return;
-    }
-
-    if (action === 'revoke-bank') {
-      await runBusy(() => request(`/api/banks/${element.dataset.id}/revoke`, { method: 'POST', body: '{}' }), 'Consentimento revogado.');
-      return;
-    }
-
     if (action === 'preview-import') {
-      state.importPreview = await runBusy(() => request('/api/imports/preview', { method: 'POST', body: JSON.stringify(state.importForm) }));
+      const payload = {
+        ...state.importForm,
+        bankKey: state.importForm.bankKey === 'AUTO' ? '' : state.importForm.bankKey,
+        accountId: state.importForm.accountId || '',
+        accountLabel: state.importForm.accountLabel || ''
+      };
+      const preview = await runAction('preview-import', () => request('/api/imports/preview', { method: 'POST', body: JSON.stringify(payload) }));
+      state.importPreview = preview;
       state.success = 'Pré-visualização gerada com sucesso.';
       render();
       return;
     }
-
     if (action === 'commit-import') {
-      const data = await runBusy(() => request('/api/imports/commit', { method: 'POST', body: JSON.stringify(state.importForm) }));
+      const payload = {
+        ...state.importForm,
+        bankKey: state.importForm.bankKey === 'AUTO' ? '' : state.importForm.bankKey,
+        accountId: state.importForm.accountId || '',
+        accountLabel: state.importForm.accountLabel || ''
+      };
+      const result = await runAction('commit-import', () => request('/api/imports/commit', { method: 'POST', body: JSON.stringify(payload) }));
       state.importPreview = null;
-      setMessage('success', data.message || 'Importação concluída com sucesso.');
+      setBanner('success', result.message || 'Importação concluída com sucesso.');
     }
   }
 
   function bindEvents() {
-    root.querySelectorAll('[data-action]').forEach((button) => {
-      button.addEventListener('click', () => {
-        handleAction(button.dataset.action, button).catch(() => {});
-      });
+    root.querySelectorAll('[data-action]').forEach((element) => {
+      element.addEventListener('click', () => { handleAction(element.dataset.action, element).catch(() => {}); });
     });
 
-    const selectedMember = root.querySelector('select[name="selectedMember"]');
-    if (selectedMember) {
-      selectedMember.addEventListener('change', async (event) => {
-        state.selectedMember = event.target.value;
-        await refreshData();
+    root.querySelectorAll('[name^="filter-"]').forEach((input) => {
+      input.addEventListener('change', async (event) => {
+        updateFilter(event.target.name.replace('filter-', ''), event.target.value);
+        await runAction('refresh', () => loadDashboardData());
       });
-    }
-
-    const selectedMonth = root.querySelector('select[name="selectedMonth"]');
-    if (selectedMonth) {
-      selectedMonth.addEventListener('change', async (event) => {
-        state.selectedMonth = event.target.value;
-        state.transactionForm.month = event.target.value;
-        state.importForm.month = event.target.value;
-        await refreshData();
-      });
-    }
+    });
 
     root.querySelectorAll('[name^="tx-"]').forEach((input) => {
       input.addEventListener('change', (event) => {
         const field = event.target.name.replace('tx-', '');
         state.transactionForm[field] = event.target.type === 'checkbox' ? event.target.checked : event.target.value;
         if (field === 'type') {
-          state.transactionForm.category = currentCategoryOptions()[0] || '';
+          state.transactionForm.category = currentTransactionCategories()[0] || '';
           render();
         }
       });
@@ -617,10 +748,11 @@ export function createApp({ root, apiUrl }) {
       });
     });
 
-    const bankInstitution = root.querySelector('select[name="bankInstitution"]');
-    if (bankInstitution) {
-      bankInstitution.addEventListener('change', (event) => {
-        state.bankInstitution = event.target.value;
+    const searchInput = root.querySelector('input[name="filter-search"]');
+    if (searchInput) {
+      searchInput.addEventListener('keyup', async (event) => {
+        state.filters.search = event.target.value;
+        await runAction('refresh', () => loadDashboardData());
       });
     }
 

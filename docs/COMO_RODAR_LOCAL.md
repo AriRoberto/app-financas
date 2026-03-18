@@ -195,3 +195,65 @@ docker compose build --no-cache
   ```bash
   docker compose logs -f frontend
   ```
+
+
+## Importação multi-banco (BB + Itaú)
+
+A camada de importação agora usa uma arquitetura extensível baseada em:
+
+- `backend/src/importers/`
+- `backend/src/normalizers/`
+- `backend/src/services/import-service.js`
+- `backend/src/services/aggregation-service.js`
+
+### Contrato esperado do Banco do Brasil (BB)
+
+Layouts suportados incluem colunas equivalentes a:
+
+- `Data`
+- `Lançamento`
+- `Detalhes`
+- `Valor`
+- `Tipo Lançamento`
+
+Observações:
+
+- o parser aceita cabeçalhos entre aspas,
+- aceita quebra de linha dentro de cabeçalhos/colunas,
+- ignora linhas de saldo como `Saldo Anterior`/`Saldo Final` quando o valor é `0,00`.
+
+### Contrato esperado do Itaú
+
+Layouts suportados incluem colunas equivalentes a:
+
+- `Data`
+- `Descrição lançamento`
+- `Valor R$`
+- `Tipo`
+- `Agência`
+- `Conta corrente`
+
+Observações:
+
+- `Entrada` é normalizado como receita,
+- `Saída` é normalizado como despesa,
+- agência + conta são usadas para compor a conta no modelo interno quando não houver hint manual.
+
+### Modelo interno após importação
+
+Cada transação importada é persistida com metadados como:
+
+- `memberId`
+- `bankKey` / `bankName`
+- `accountId` / `accountLabel`
+- `type`
+- `category`
+- `description`
+- `amount`
+- `date`
+- `month`
+- `sourceFileName`
+- `importOrigin`
+- `referencePeriod`
+
+Isso permite dashboards por banco, conta e membro, além de futura migração para persistência relacional sem refazer a regra de importação.
