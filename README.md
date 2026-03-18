@@ -48,6 +48,21 @@ Projeto full-stack para controlar receitas e despesas familiares com foco em:
   - `GET /api/banks/accounts`
   - `GET /api/banks/accounts/{id}/transactions?from=&to=`
 
+
+## Importação manual de CSV/JSON
+- A área **Importação manual de arquivos** permite importar CSV/JSON para `receita`, `despesa`, `investimento` ou `transações/movimentações`.
+- Fluxo completo:
+  1. frontend lê o arquivo (ou texto colado) e envia o conteúdo para `POST /api/imports/preview`;
+  2. backend interpreta o CSV/JSON, valida os campos mínimos, normaliza `memberId`, `type`, `amount`, `date` e `month`;
+  3. após confirmação, o frontend chama `POST /api/imports/commit`;
+  4. backend persiste os lançamentos no snapshot local `backend/data/finance-state.json`, atualiza histórico de importação e recalcula investimentos espelhados;
+  5. frontend faz re-fetch de dashboard, lançamentos, investimentos e histórico de importação para refletir os novos totais/cartões/listagens.
+- Os dados importados permanecem salvos após recarregar a página e também após reiniciar o backend, desde que o arquivo de persistência `backend/data/finance-state.json` continue disponível.
+- Endpoints relacionados:
+  - `POST /api/imports/preview`
+  - `POST /api/imports/commit`
+  - `GET /api/imports/history`
+
 ## Configuração segura
 Use `.env.example` e configure no ambiente:
 - `AISP_BASE_URL`

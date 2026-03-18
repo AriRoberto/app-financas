@@ -85,3 +85,45 @@ AISP_REDIRECT_URI=http://localhost:3333/api/banks/callback
 TOKEN_ENCRYPTION_KEY=uma-chave-forte-com-32-bytes-ou-mais
 SYNC_DEFAULT_DAYS=90
 ```
+
+
+## Passo a passo: importação manual de CSV
+1. Abra a área **Importação manual de arquivos** na tela principal.
+2. Selecione o membro da família que receberá os lançamentos.
+3. Selecione o tipo de dado (`Transações / movimentações`, `Receitas`, `Despesas` ou `Investimentos`).
+4. Escolha um arquivo CSV/JSON ou cole o conteúdo manualmente.
+5. Clique em **Pré-visualizar importação**.
+6. Revise as linhas interpretadas, tipos, categorias, descrições, valores e possíveis duplicidades.
+7. Clique em **Confirmar importação**.
+8. Após a confirmação, o app mostra mensagem com quantidade importada e recarrega dashboard, totais, listagens e histórico de importações.
+
+## Como funciona a sincronização com o backend
+1. O frontend lê o arquivo via `File.text()` ou usa o conteúdo colado.
+2. O frontend monta um payload com `fileName`, `content`, `memberId`, `importType` e `month`.
+3. Esse payload é enviado para `POST /api/imports/preview` para validação e interpretação inicial.
+4. Depois da confirmação, o mesmo conteúdo vai para `POST /api/imports/commit`.
+5. O backend valida o membro, o conteúdo, o formato e o mapeamento dos campos.
+6. O backend persiste o snapshot financeiro em `backend/data/finance-state.json`.
+7. Em seguida, o frontend consulta novamente `/api/dashboard`, `/api/transactions`, `/api/investments` e `/api/imports/history`.
+8. A interface atualiza cards, totais por membro, listagens e resumos com base nos dados persistidos.
+
+## Como confirmar que os dados ficaram salvos
+1. Verifique os cards de receita/despesa/investimento logo após importar.
+2. Verifique os cartões por membro da família.
+3. Verifique a tabela/lista de lançamentos no período/mês correspondente ao CSV importado.
+4. Verifique a seção **Últimas importações**.
+5. Recarregue a página e confirme que os dados continuam visíveis.
+6. Reinicie backend e frontend e confirme que os dados continuam sendo carregados do arquivo `backend/data/finance-state.json`.
+
+## Como debugar se algo der errado
+1. Abra o console do navegador e procure logs com o prefixo `[imports]`.
+2. Abra a aba **Network** e confira as chamadas para:
+   - `POST /api/imports/preview`
+   - `POST /api/imports/commit`
+   - `GET /api/dashboard`
+   - `GET /api/transactions`
+   - `GET /api/imports/history`
+3. No backend, confira os logs `[imports]` e `[finance-store]` para saber se houve preview, commit e persistência.
+4. Inspecione a resposta do endpoint de importação para conferir `importedRows`, `duplicateRows` e `importedMonths`.
+5. Verifique se o arquivo `backend/data/finance-state.json` recebeu os registros persistidos.
+6. Se os dados não aparecerem, confirme se o filtro de período/mês selecionado corresponde ao mês importado.

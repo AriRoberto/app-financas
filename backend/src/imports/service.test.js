@@ -56,3 +56,18 @@ test('previewImportRows usa fallback quando conteúdo colado não tem filename',
   assert.equal(result.rows[0].category, 'Salário');
   assert.equal(result.rows[0].month, '2026-03');
 });
+
+
+test('previewImportRows falha com valor ausente no CSV', () => {
+  assert.throws(
+    () => previewImportRows({
+      fileName: 'extrato.csv',
+      content: `data,descricao,valor
+18/03/2026,Supermercado,`,
+      importType: 'expense',
+      memberId: 'wife',
+      fallbackMonth: '2026-03'
+    }),
+    /Erro na linha 2: Valor ausente no arquivo/
+  );
+});

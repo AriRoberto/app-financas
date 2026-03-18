@@ -108,6 +108,7 @@ function App() {
   const [saving, setSaving] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [error, setError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
   const [connectingBank, setConnectingBank] = useState(false);
   const [bankInstitution, setBankInstitution] = useState('BB');
   const [bankInstitutions, setBankInstitutions] = useState([]);
@@ -116,6 +117,7 @@ function App() {
   const [importForm, setImportForm] = useState(initialImportState);
   const [importPreview, setImportPreview] = useState(null);
   const [importingFile, setImportingFile] = useState(false);
+  const [importHistory, setImportHistory] = useState([]);
 
   const currentCategories = useMemo(() => {
     if (form.type === 'income') return incomeCategories;
@@ -135,14 +137,22 @@ function App() {
   }
 
   function queryParams(month = selectedMonth) {
-    return new URLSearchParams({
-      month,
+    const params = new URLSearchParams({
       member: selectedMember,
       term: selectedTerm,
-      from: fromDate,
-      to: toDate,
       ts: Date.now().toString()
-    }).toString();
+    });
+
+    if (periodPreset === 'month') {
+      params.set('month', month);
+      params.set('from', `${month}-01`);
+      params.set('to', `${month}-31`);
+    } else {
+      if (fromDate) params.set('from', fromDate);
+      if (toDate) params.set('to', toDate);
+    }
+
+    return params.toString();
   }
 
   async function loadStaticData() {
@@ -170,14 +180,28 @@ function App() {
 
   async function loadData(month = selectedMonth) {
     const params = queryParams(month);
-    const [dashboardRes, suggestionsRes, transactionsRes, monthsRes, investmentsRes, bankConnectionsRes, recoveryPlanRes] = await Promise.all([
+    const investmentsParams = new URLSearchParams({
+      member: selectedMember,
+      ts: Date.now().toString()
+    });
+
+    if (periodPreset === 'month') {
+      investmentsParams.set('from', `${month}-01`);
+      investmentsParams.set('to', `${month}-31`);
+    } else {
+      if (fromDate) investmentsParams.set('from', fromDate);
+      if (toDate) investmentsParams.set('to', toDate);
+    }
+
+    const [dashboardRes, suggestionsRes, transactionsRes, monthsRes, investmentsRes, bankConnectionsRes, recoveryPlanRes, importHistoryRes] = await Promise.all([
       fetchNoStore(`${API_URL}/api/dashboard?${params}`),
       fetchNoStore(`${API_URL}/api/suggestions?${params}`),
       fetchNoStore(`${API_URL}/api/transactions?${params}`),
       fetchNoStore(`${API_URL}/api/months?member=${selectedMember}&ts=${Date.now()}`),
-      fetchNoStore(`${API_URL}/api/investments?member=${selectedMember}&from=${fromDate}&to=${toDate}&ts=${Date.now()}`),
+      fetchNoStore(`${API_URL}/api/investments?${investmentsParams.toString()}`),
       fetchNoStore(`${API_URL}/api/banks/connections?ts=${Date.now()}`),
-      fetchNoStore(`${API_URL}/api/recovery/plan?${params}`)
+      fetchNoStore(`${API_URL}/api/recovery/plan?${params}`),
+      fetchNoStore(`${API_URL}/api/imports/history?ts=${Date.now()}`)
     ]);
 
     const dashboardData = await dashboardRes.json();
@@ -187,6 +211,13 @@ function App() {
     const investmentsJson = await investmentsRes.json();
     const connectionsJson = await bankConnectionsRes.json();
     const recoveryPlanJson = await recoveryPlanRes.json();
+    const importHistoryJson = await importHistoryRes.json();
+
+    console.info('[imports] data reloaded', {
+      month,
+      transactions: transactionsData.transactions?.length || 0,
+      imports: importHistoryJson.imports?.length || 0
+    });
 
     setDashboard(dashboardData);
     setSuggestions(suggestionsData.suggestions || []);
@@ -195,11 +226,13 @@ function App() {
     setInvestments(investmentsJson);
     setBankConnections(connectionsJson.connections || []);
     setRecoveryPlan(recoveryPlanJson);
+    setImportHistory(importHistoryJson.imports || []);
   }
 
   async function boot() {
     setLoading(true);
     setError('');
+    setSuccessMessage('');
     try {
       await loadStaticData();
       await loadData(selectedMonth);
@@ -298,6 +331,7 @@ function App() {
   async function handleConnectBank() {
     setConnectingBank(true);
     setError('');
+    setSuccessMessage('');
     try {
       const response = await fetchNoStore(`${API_URL}/api/banks/connect`, {
         method: 'POST',
@@ -332,6 +366,7 @@ function App() {
   }
 
   async function handleRevokeConnection(connectionId) {
+    setSuccessMessage('');
     try {
       const response = await fetchNoStore(`${API_URL}/api/banks/${connectionId}/revoke`, { method: 'POST' });
       if (!response.ok) throw new Error('Falha ao revogar conexão.');
@@ -342,6 +377,7 @@ function App() {
   }
 
   async function handleSyncConnection(connectionId) {
+    setSuccessMessage('');
     try {
       const response = await fetchNoStore(`${API_URL}/api/banks/${connectionId}/sync`, { method: 'POST' });
       if (!response.ok) throw new Error('Falha ao sincronizar conexão.');
@@ -355,6 +391,7 @@ function App() {
     event.preventDefault();
     setSaving(true);
     setError('');
+    setSuccessMessage('');
 
     try {
       const payload = {
@@ -375,6 +412,7 @@ function App() {
 
       await loadData(selectedMonth);
       setForm((old) => ({ ...old, description: '', amount: '', date: '', dueDate: '', isInvestmentReserve: false }));
+      setSuccessMessage('Lançamento salvo com sucesso.');
     } catch (err) {
       setError(err.message || 'Erro ao salvar.');
     } finally {
@@ -384,6 +422,7 @@ function App() {
 
 
   async function handleClearDemoData() {
+    setSuccessMessage('');
     const confirmed = window.confirm('Isso vai limpar todos os dados atuais (inclusive lançamentos reais). Deseja continuar?');
     if (!confirmed) return;
 
@@ -396,6 +435,7 @@ function App() {
         throw new Error('Não foi possível limpar os dados de teste.');
       }
       await loadData(selectedMonth);
+      setSuccessMessage('Dados limpos com sucesso.');
     } catch (err) {
       setError(err.message || 'Erro ao limpar os dados de teste.');
     } finally {
@@ -405,12 +445,14 @@ function App() {
 
   async function handleRestoreDemoData() {
     setError('');
+    setSuccessMessage('');
     try {
       const response = await fetchNoStore(`${API_URL}/api/transactions/seed`, { method: 'POST' });
       if (!response.ok) {
         throw new Error('Não foi possível restaurar os dados de exemplo.');
       }
       await loadData(selectedMonth);
+      setSuccessMessage('Dados de exemplo restaurados com sucesso.');
     } catch (err) {
       setError(err.message || 'Erro ao restaurar os dados de exemplo.');
     }
@@ -420,14 +462,29 @@ function App() {
     const file = event.target.files?.[0];
     if (!file) return;
     const content = await file.text();
+    console.info('[imports] file selected', { name: file.name, size: file.size });
     setImportForm((old) => ({ ...old, fileName: file.name, content }));
     setImportPreview(null);
+    setSuccessMessage('');
   }
 
   async function handlePreviewImport() {
     setError('');
+    setSuccessMessage('');
+
+    if (!importForm.content.trim()) {
+      setError('Selecione um arquivo CSV/JSON ou cole o conteúdo para pré-visualizar.');
+      return;
+    }
+
     setImportingFile(true);
     try {
+      console.info('[imports] preview request', {
+        fileName: importForm.fileName || 'clipboard-import.csv',
+        memberId: importForm.memberId,
+        importType: importForm.importType
+      });
+
       const response = await fetchNoStore(`${API_URL}/api/imports/preview`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -438,7 +495,9 @@ function App() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Falha ao pré-visualizar importação.');
+      console.info('[imports] preview response', { rows: data.summary?.totalRows || 0, duplicates: data.summary?.duplicates || 0, format: data.format });
       setImportPreview(data);
+      setSuccessMessage(`Pré-visualização pronta: ${data.summary?.totalRows || 0} linha(s) interpretada(s).`);
     } catch (err) {
       setError(err.message || 'Erro ao gerar pré-visualização.');
     } finally {
@@ -448,8 +507,16 @@ function App() {
 
   async function handleConfirmImport() {
     setError('');
+    setSuccessMessage('');
+
+    if (!importPreview?.rows?.length) {
+      setError('Faça a pré-visualização antes de confirmar a importação.');
+      return;
+    }
+
     setImportingFile(true);
     try {
+      console.info('[imports] commit request', { fileName: importForm.fileName || 'clipboard-import.csv', memberId: importForm.memberId, importType: importForm.importType, previewRows: importPreview.rows.length });
       const response = await fetchNoStore(`${API_URL}/api/imports/commit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -460,9 +527,15 @@ function App() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Falha ao importar arquivo.');
+      console.info('[imports] commit response', data);
+      const nextMonth = data.importedMonths?.length ? data.importedMonths[data.importedMonths.length - 1] : selectedMonth;
       setImportPreview(null);
       setImportForm((old) => ({ ...old, fileName: '', content: '' }));
-      await loadData(selectedMonth);
+      if (periodPreset === 'month' && nextMonth) {
+        setSelectedMonth(nextMonth);
+      }
+      await loadData(nextMonth || selectedMonth);
+      setSuccessMessage(data.message || `Importação concluída: ${data.importedRows || 0} registro(s).`);
     } catch (err) {
       setError(err.message || 'Erro ao confirmar importação.');
     } finally {
@@ -541,6 +614,7 @@ function App() {
       </section>
 
       {error ? <p className="error">{error}</p> : null}
+      {successMessage ? <p className="success">{successMessage}</p> : null}
 
       {recoveryPlan?.entryPoints?.passive?.shouldSurface ? (
         <section className={`panel recovery-alert ${recoverySeverityClass(recoveryPlan.severity)}`}>
@@ -644,7 +718,7 @@ function App() {
               <input type="file" accept=".csv,.json,.ofx,application/json,text/csv" onChange={handleImportFileSelection} />
             </label>
             <label>Ou cole o conteúdo
-              <textarea rows="5" value={importForm.content} onChange={(e) => setImportForm((old) => ({ ...old, content: e.target.value }))} />
+              <textarea rows="5" value={importForm.content} onChange={(e) => { setImportForm((old) => ({ ...old, content: e.target.value })); setImportPreview(null); }} />
             </label>
           </div>
           <div className="form-actions">
@@ -679,6 +753,21 @@ function App() {
               </table>
             </div>
           ) : null}
+
+          <div className="import-history">
+            <h3>Últimas importações</h3>
+            {importHistory.length ? (
+              <ul>
+                {importHistory.slice(0, 5).map((item) => (
+                  <li key={item.id}>
+                    <strong>{item.fileName}</strong> — {item.importedRows} importado(s), {item.duplicateRows} duplicado(s), membro {memberLabel(item.memberId)}.
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="panel-help">Nenhuma importação registrada ainda.</p>
+            )}
+          </div>
         </article>
 
         <article className="panel">

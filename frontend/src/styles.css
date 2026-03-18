@@ -269,6 +269,33 @@ td {
   margin-bottom: 12px;
 }
 
+
+.success {
+  color: #067647;
+  background: #ecfdf3;
+  border: 1px solid #abefc6;
+  padding: 12px;
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+
+.import-history {
+  margin-top: 16px;
+  border-top: 1px solid #e2e8f0;
+  padding-top: 12px;
+}
+
+.import-history ul {
+  margin: 0;
+  padding-left: 18px;
+  color: #334155;
+}
+
+.import-history li {
+  margin-bottom: 8px;
+}
+
+
 @media (max-width: 900px) {
   .hero {
     flex-direction: column;

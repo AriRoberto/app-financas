@@ -25,12 +25,24 @@ import { registerMockAispRoutes } from './openfinance/mock-aisp.js';
 import { startPeriodicSync, syncByConnectionId } from './openfinance/sync-service.js';
 import { getInstitutionByKey } from './openfinance/institutions.js';
 import { previewImportRows } from './imports/service.js';
+import { loadFinanceState, resetFinanceState, saveFinanceState } from './persistence/local-store.js';
 
 const app = express();
 const PORT = process.env.PORT || 3333;
 const ofConfig = getEnvConfig();
 const aispClient = new AispClient(ofConfig);
 const rateLimitSync = new Map();
+
+function getRequestScopedAispClient(req) {
+  if (!ofConfig.openFinanceMock) return aispClient;
+  const host = req.headers.host || `localhost:${PORT}`;
+  const origin = `http://${host}`;
+  return new AispClient({
+    ...ofConfig,
+    aispBaseUrl: `${origin}/mock-aisp`,
+    aispRedirectUri: `${origin}/api/banks/callback`
+  });
+}
 
 app.use(cors());
 app.use(express.json());
@@ -137,9 +149,22 @@ function cloneSampleTransactions() {
   }));
 }
 
-let transactions = cloneSampleTransactions();
+const defaultFinanceState = {
+  transactions: cloneSampleTransactions(),
+  importHistory: []
+};
+
+const persistedFinanceState = loadFinanceState(defaultFinanceState);
+
+let transactions = persistedFinanceState.transactions.map((item) => ({
+  ...item,
+  memberId: normalizeMemberId(item.memberId),
+  month: isValidMonth(item.month) ? item.month : getMonthFromDate(item.date || `${new Date().toISOString().slice(0, 7)}-01`),
+  term: item.type === 'expense' ? classifyTerm(item.dueDate || item.date) : null,
+  isInvestmentReserve: item.type === 'expense' ? Boolean(item.isInvestmentReserve || item.category === 'Reserva para investir') : false
+}));
 let investments = [];
-let importHistory = [];
+let importHistory = persistedFinanceState.importHistory || [];
 
 function endOfCurrentYear() {
   const now = new Date();
@@ -544,6 +569,11 @@ function buildImportedTransaction(previewItem) {
   };
 }
 
+function persistFinanceSnapshot(reason, extra = {}) {
+  saveFinanceState({ transactions, importHistory });
+  console.info('[finance-store] snapshot saved', { reason, ...extra, transactions: transactions.length, importHistory: importHistory.length });
+}
+
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, service: 'backend', timestamp: new Date().toISOString() });
 });
@@ -584,12 +614,22 @@ app.get('/api/transactions', (req, res) => {
 app.delete('/api/transactions', (_req, res) => {
   transactions = [];
   investments = [];
+  importHistory = [];
+  persistFinanceSnapshot('transactions_cleared');
   res.json({ message: 'Todos os lançamentos removidos.', transactionsCount: 0 });
 });
 
 app.post('/api/transactions/seed', (_req, res) => {
-  transactions = cloneSampleTransactions();
+  const resetState = resetFinanceState(defaultFinanceState);
+  transactions = resetState.transactions.map((item) => ({
+    ...item,
+    memberId: normalizeMemberId(item.memberId),
+    term: item.type === 'expense' ? classifyTerm(item.dueDate || item.date) : null,
+    isInvestmentReserve: Boolean(item.isInvestmentReserve || item.category === 'Reserva para investir')
+  }));
+  importHistory = resetState.importHistory;
   seedInvestmentsFromTransactions();
+  console.info('[imports] sample data restored', { transactions: transactions.length });
   res.json({ message: 'Dados de exemplo restaurados.', transactionsCount: transactions.length });
 });
 
@@ -611,6 +651,8 @@ app.post('/api/imports/preview', (req, res) => {
     }
 
     const safeFileName = fileName || 'clipboard-import.csv';
+
+    console.info('[imports] preview requested', { fileName: safeFileName, importType, memberId: normalizedMemberId });
 
     const preview = previewImportRows({
       fileName: safeFileName,
@@ -651,6 +693,8 @@ app.post('/api/imports/commit', (req, res) => {
 
     const safeFileName = fileName || 'clipboard-import.csv';
 
+    console.info('[imports] commit requested', { fileName: safeFileName, importType, memberId: normalizedMemberId });
+
     const preview = previewImportRows({
       fileName: safeFileName,
       content,
@@ -661,6 +705,7 @@ app.post('/api/imports/commit', (req, res) => {
 
     let imported = 0;
     let duplicates = 0;
+    const importedMonths = new Set();
 
     for (const row of preview.rows) {
       if (hasImportedFingerprint(row.fingerprint)) {
@@ -671,6 +716,7 @@ app.post('/api/imports/commit', (req, res) => {
       const transaction = buildImportedTransaction(row);
       transactions = [transaction, ...transactions];
       upsertInvestmentFromReserve(transaction);
+      importedMonths.add(transaction.month);
       imported += 1;
     }
 
@@ -689,11 +735,16 @@ app.post('/api/imports/commit', (req, res) => {
       ...importHistory
     ];
 
+    persistFinanceSnapshot('import_commit', { fileName: safeFileName, importedRows: imported, duplicateRows: duplicates });
+    console.info('[imports] commit finished', { fileName: safeFileName, importedRows: imported, duplicateRows: duplicates, importedMonths: [...importedMonths] });
+
     return res.json({
-      message: imported ? 'Importação concluída com sucesso.' : 'Nenhum novo registro foi importado.',
+      message: imported ? `Importação concluída com sucesso. ${imported} registro(s) salvo(s).` : 'Nenhum novo registro foi importado.',
       importedRows: imported,
       duplicateRows: duplicates,
-      totalRows: preview.rows.length
+      totalRows: preview.rows.length,
+      importedMonths: [...importedMonths].sort(),
+      imports: importHistory.slice(0, 5)
     });
   } catch (err) {
     return res.status(400).json({ message: err.message || 'Falha ao importar arquivo.' });
@@ -763,6 +814,7 @@ app.post('/api/transactions', (req, res) => {
 
   transactions = [transaction, ...transactions];
   upsertInvestmentFromReserve(transaction);
+  persistFinanceSnapshot('transaction_created', { transactionId: transaction.id });
   res.status(201).json({ transaction });
 });
 
@@ -781,6 +833,7 @@ app.patch('/api/transactions/:id', (req, res) => {
 
   transactions = transactions.map((item) => (item.id === target.id ? next : item));
   upsertInvestmentFromReserve(next);
+  persistFinanceSnapshot('transaction_updated', { transactionId: next.id });
   return res.json({ transaction: next });
 });
 
@@ -789,6 +842,7 @@ app.delete('/api/transactions/:id', (req, res) => {
   if (!exists) return res.status(404).json({ message: 'Lançamento não encontrado.' });
   transactions = transactions.filter((item) => item.id !== req.params.id);
   investments = investments.filter((item) => item.sourceTransactionId !== req.params.id);
+  persistFinanceSnapshot('transaction_deleted', { transactionId: req.params.id });
   return res.status(204).send();
 });
 
@@ -883,7 +937,8 @@ app.post('/api/banks/connect', async (req, res) => {
     }
 
     const institution = getInstitutionByKey(institution_key);
-    const connectorResolution = await aispClient.resolve_institution(institution);
+    const requestAispClient = getRequestScopedAispClient(req);
+    const connectorResolution = await requestAispClient.resolve_institution(institution);
 
     const connection = createConnection({
       user_id,
@@ -909,7 +964,7 @@ app.post('/api/banks/connect', async (req, res) => {
     const state = randomState();
     saveState(state, { connection_id: connection.id, user_id, institution_key, scopes, fromDate, toDate });
 
-    const consent = await aispClient.create_consent({
+    const consent = await requestAispClient.create_consent({
       user_id,
       institution,
       scopes,
@@ -949,7 +1004,8 @@ app.get('/api/banks/callback', async (req, res) => {
     let expiresAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
 
     if (ofConfig.openFinanceMock) {
-      const tokenPayload = await aispClient.exchange_code_for_token(code);
+      const requestAispClient = getRequestScopedAispClient(req);
+      const tokenPayload = await requestAispClient.exchange_code_for_token(code);
       externalConsentRef = tokenPayload.consent_ref;
       expiresAt = tokenPayload.expires_at;
 
@@ -988,7 +1044,7 @@ app.get('/api/banks/callback', async (req, res) => {
 
     syncByConnectionId({
       connectionId: pending.connection_id,
-      aispClient,
+      aispClient: getRequestScopedAispClient(req),
       fromDate: pending.fromDate,
       toDate: pending.toDate
     }).catch(() => {});
@@ -1029,7 +1085,7 @@ app.post('/api/banks/:connectionId/sync', async (req, res) => {
     const now = new Date();
     const toDate = req.body.to || now.toISOString().slice(0, 10);
     const fromDate = req.body.from || new Date(now.getTime() - ofConfig.syncDefaultDays * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-    const data = await syncByConnectionId({ connectionId, aispClient, fromDate, toDate });
+    const data = await syncByConnectionId({ connectionId, aispClient: getRequestScopedAispClient(req), fromDate, toDate });
     return res.json(data);
   } catch (err) {
     if (err?.message === 'connection_not_authorized') {
@@ -1048,7 +1104,7 @@ app.post('/api/banks/:connectionId/revoke', async (req, res) => {
   if (!consent) return res.status(404).json({ message: 'Consentimento não encontrado.' });
 
   try {
-    await aispClient.revoke_consent(consent.consent_id_externo);
+    await getRequestScopedAispClient(req).revoke_consent(consent.consent_id_externo);
   } catch {
     // best-effort revoke
   }
@@ -1085,7 +1141,8 @@ export {
   upsertInvestmentFromReserve,
   encryptToken,
   decryptToken,
-  __resetOpenFinanceStore
+  __resetOpenFinanceStore,
+  persistFinanceSnapshot
 };
 
 if (process.env.NODE_ENV !== 'test') {
