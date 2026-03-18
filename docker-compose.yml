@@ -1,0 +1,30 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      PORT: 3333
+      OPEN_FINANCE_MOCK: ${OPEN_FINANCE_MOCK:-true}
+      AISP_BASE_URL: ${AISP_BASE_URL:-http://backend:3333/mock-aisp}
+      AISP_CLIENT_ID: ${AISP_CLIENT_ID:-mock}
+      AISP_CLIENT_SECRET: ${AISP_CLIENT_SECRET:-mock}
+      AISP_REDIRECT_URI: ${AISP_REDIRECT_URI:-http://backend:3333/api/banks/callback}
+      TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY:-change-me-32bytes-minimum-secret-key}
+      SYNC_DEFAULT_DAYS: ${SYNC_DEFAULT_DAYS:-90}
+    ports:
+      - "3333:3333"
+    volumes:
+      - ./backend/data:/app/data
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    depends_on:
+      - backend
+    environment:
+      PORT: 5173
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:3333}
+    ports:
+      - "5173:5173"
