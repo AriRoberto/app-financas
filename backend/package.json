@@ -1,0 +1,16 @@
+{
+  "name": "app-financas-backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/server.js",
+    "start": "node src/server.js",
+    "test": "NODE_ENV=test node --test src/*.test.js src/**/*.test.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "pluggy-sdk": "^1.26.0"
+  }
+}
