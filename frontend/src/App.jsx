@@ -61,6 +61,16 @@ async function parseJson(response) {
   return payload;
 }
 
+async function readImportFile(file) {
+  const buffer = await file.arrayBuffer();
+
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(buffer);
+  } catch {
+    return new TextDecoder('latin1').decode(buffer);
+  }
+}
+
 export function createApp({ root, apiUrl }) {
   const state = {
     loading: true,
@@ -620,7 +630,7 @@ export function createApp({ root, apiUrl }) {
         const file = event.target.files?.[0];
         if (!file) return;
         state.importForm.fileName = file.name;
-        state.importForm.content = await file.text();
+        state.importForm.content = await readImportFile(file);
         render();
       });
     }

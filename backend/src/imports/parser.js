@@ -11,6 +11,8 @@ const HEADER_ALIASES = {
   lancamento_data: 'date',
   transaction_date: 'date',
 
+  lancamento: 'description',
+
   descricao: 'description',
   descrição: 'description',
   historico: 'description',
@@ -21,6 +23,8 @@ const HEADER_ALIASES = {
   details: 'description',
   narrative: 'description',
   merchant_name: 'description',
+
+  tipo_lancamento: 'entry_direction',
 
   valor: 'amount',
   valor_movimentado: 'amount',
@@ -57,6 +61,10 @@ function normalizeHeader(value) {
   return HEADER_ALIASES[normalized] || normalized;
 }
 
+function sanitizeCsvContent(content) {
+  return String(content || '').replace(/^\uFEFF/, '');
+}
+
 function detectDelimiter(line) {
   let commas = 0;
   let semicolons = 0;
@@ -83,14 +91,61 @@ function detectDelimiter(line) {
   return semicolons > commas ? ';' : ',';
 }
 
-function parseCsvLine(line, delimiter) {
-  const values = [];
+function getFirstCsvRecord(content) {
   let current = '';
   let inQuotes = false;
 
-  for (let i = 0; i < line.length; i += 1) {
-    const char = line[i];
-    const next = line[i + 1];
+  for (let i = 0; i < content.length; i += 1) {
+    const char = content[i];
+    const next = content[i + 1];
+
+    if (char === '"' && inQuotes && next === '"') {
+      current += '"';
+      i += 1;
+      continue;
+    }
+
+    if (char === '"') {
+      inQuotes = !inQuotes;
+      current += char;
+      continue;
+    }
+
+    if (!inQuotes && (char === '\n' || char === '\r')) {
+      return current;
+    }
+
+    current += char;
+  }
+
+  return current;
+}
+
+function parseCsvRows(content, delimiter) {
+  const rows = [];
+  let row = [];
+  let current = '';
+  let inQuotes = false;
+  let line = 1;
+  let rowStartLine = 1;
+
+  function pushCell() {
+    row.push(current.trim());
+    current = '';
+  }
+
+  function pushRow() {
+    const hasData = row.some((value) => value !== '');
+    if (hasData) {
+      rows.push({ values: row, line: rowStartLine });
+    }
+    row = [];
+    rowStartLine = line;
+  }
+
+  for (let i = 0; i < content.length; i += 1) {
+    const char = content[i];
+    const next = content[i + 1];
 
     if (char === '"' && inQuotes && next === '"') {
       current += '"';
@@ -103,36 +158,55 @@ function parseCsvLine(line, delimiter) {
       continue;
     }
 
-    if (char === delimiter && !inQuotes) {
-      values.push(current.trim());
-      current = '';
+    if (!inQuotes && char === delimiter) {
+      pushCell();
       continue;
     }
 
+    if (!inQuotes && char === '\r') {
+      pushCell();
+      pushRow();
+      if (next === '\n') i += 1;
+      line += 1;
+      rowStartLine = line;
+      continue;
+    }
+
+    if (!inQuotes && char === '\n') {
+      pushCell();
+      pushRow();
+      line += 1;
+      rowStartLine = line;
+      continue;
+    }
+
+    if (char === '\n') line += 1;
     current += char;
   }
 
-  values.push(current.trim());
-  return values;
+  if (current !== '' || row.length) {
+    pushCell();
+    pushRow();
+  }
+
+  return rows;
 }
 
 function parseCsv(content) {
-  const lines = String(content || '')
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
+  const sanitized = sanitizeCsvContent(content);
+  const firstRecord = getFirstCsvRecord(sanitized);
+  const delimiter = detectDelimiter(firstRecord);
+  const rows = parseCsvRows(sanitized, delimiter);
 
-  if (lines.length < 2) {
+  if (rows.length < 2) {
     throw new Error('CSV inválido: informe cabeçalho e ao menos uma linha.');
   }
 
-  const delimiter = detectDelimiter(lines[0]);
-  const headers = parseCsvLine(lines[0], delimiter).map(normalizeHeader);
-  return lines.slice(1).map((line, index) => {
-    const cols = parseCsvLine(line, delimiter);
-    const row = { __line: index + 2, __delimiter: delimiter };
+  const headers = rows[0].values.map(normalizeHeader);
+  return rows.slice(1).map(({ values, line }) => {
+    const row = { __line: line, __delimiter: delimiter };
     headers.forEach((header, idx) => {
-      row[header] = cols[idx] || '';
+      row[header] = values[idx] || '';
     });
     return row;
   });

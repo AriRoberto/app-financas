@@ -2,7 +2,7 @@ import { buildImportFingerprint, parseImportContent } from './parser.js';
 
 function parseSignedAmount(raw) {
   if (typeof raw === 'number') {
-    if (Number.isNaN(raw) || raw === 0) throw new Error('Valor inválido no arquivo.');
+    if (Number.isNaN(raw)) throw new Error('Valor inválido no arquivo.');
     return raw;
   }
 
@@ -17,8 +17,12 @@ function parseSignedAmount(raw) {
     .replace(/[^\d.-]/g, '')
     .replace(/-$/g, '');
 
+  if (!cleaned || cleaned === '-' || cleaned === '.' || cleaned === '-.') {
+    throw new Error('Valor inválido no arquivo.');
+  }
+
   const value = Number(cleaned);
-  if (Number.isNaN(value) || value === 0) throw new Error('Valor inválido no arquivo.');
+  if (Number.isNaN(value)) throw new Error('Valor inválido no arquivo.');
   return negative ? -Math.abs(value) : value;
 }
 
@@ -64,6 +68,17 @@ function normalizeMonth(date) {
   return String(date).slice(0, 7);
 }
 
+function shouldIgnoreRow({ amount, description, row }) {
+  const normalizedDescription = String(description || '').trim().toLowerCase();
+  const normalizedType = String(pickValue(row, ['type', 'tipo', 'entry_type']) || '').trim().toLowerCase();
+
+  if (amount !== 0) return false;
+  if (['saldo anterior', 'saldo final', 'saldo bloqueado', 'saldo disponivel', 'saldo disponível'].some((item) => normalizedDescription.includes(item))) {
+    return true;
+  }
+  return ['saldo', 'balance'].includes(normalizedType);
+}
+
 function resolveEffectiveAmountAndType(row, importType) {
   const signedAmount = parseSignedAmount(pickValue(row, ['amount', 'valor', 'value', 'valor_movimentado', 'valor_lancamento']));
   const direction = normalizeDirection(pickValue(row, ['entry_direction', 'debito_credito', 'debito_ou_credito', 'natureza', 'dc']));
@@ -74,12 +89,12 @@ function resolveEffectiveAmountAndType(row, importType) {
   if (direction === 'credit') normalizedSignedAmount = Math.abs(signedAmount);
 
   const type = normalizeType(direction || explicitType, importType, normalizedSignedAmount);
-  return { amount: Math.abs(normalizedSignedAmount), type };
+  return { amount: Math.abs(normalizedSignedAmount), signedAmount: normalizedSignedAmount, type };
 }
 
 export function previewImportRows({ fileName, content, importType, memberId, fallbackMonth = new Date().toISOString().slice(0, 7) }) {
   const { format, rows } = parseImportContent({ fileName, content });
-  const preview = rows.map((row, index) => {
+  const preview = rows.flatMap((row, index) => {
     try {
       const { amount, type } = resolveEffectiveAmountAndType(row, importType);
       const date = normalizeDate(pickValue(row, ['date', 'data', 'booked_at', 'data_lancamento', 'data_movimentacao', 'data_movimento', 'transaction_date']), fallbackMonth);
@@ -87,7 +102,11 @@ export function previewImportRows({ fileName, content, importType, memberId, fal
       const description = pickValue(row, ['description', 'descricao', 'descrição', 'merchant', 'historico', 'historico_lancamento', 'detalhe', 'memo']) || `Importação ${index + 1}`;
       const dueDate = normalizeDate(pickValue(row, ['due_date', 'vencimento', 'data_vencimento']), normalizeMonth(date));
 
-      return {
+      if (shouldIgnoreRow({ amount, description, row })) {
+        return [];
+      }
+
+      return [{
         importType,
         memberId,
         type,
@@ -98,7 +117,7 @@ export function previewImportRows({ fileName, content, importType, memberId, fal
         month: normalizeMonth(date),
         dueDate,
         fingerprint: buildImportFingerprint({ memberId, type, category, description, amount, date })
-      };
+      }];
     } catch (error) {
       const line = row.__line || index + 2;
       throw new Error(`Erro na linha ${line}: ${error.message}`);

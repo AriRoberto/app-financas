@@ -72,6 +72,36 @@ test('previewImportRows usa sinal negativo para inferir despesa quando importTyp
   assert.equal(result.rows[0].amount, 125.45);
 });
 
+test('previewImportRows suporta cabeçalho CSV com quebra de linha em campo entre aspas', () => {
+  const result = previewImportRows({
+    fileName: 'extrato-bb.csv',
+    content: '"Data","Lançamento","Detalhes","Nº documento","Valor","Tipo\nLançamento"\n"02/01/2026","Cobrança de Juros","Juros Saldo Devedor Conta","511058923","-86,70","Saída"',
+    importType: 'transaction',
+    memberId: 'husband',
+    fallbackMonth: '2026-01'
+  });
+
+  assert.equal(result.rows.length, 1);
+  assert.equal(result.rows[0].description, 'Cobrança de Juros');
+  assert.equal(result.rows[0].amount, 86.7);
+  assert.equal(result.rows[0].type, 'expense');
+});
+
+test('previewImportRows ignora linha de saldo anterior com valor zero', () => {
+  const result = previewImportRows({
+    fileName: 'extrato-bb.csv',
+    content: '"Data","Lançamento","Detalhes","Nº documento","Valor","Tipo"\n"31/12/2025","Saldo Anterior","","","0,00","Saldo"\n"02/01/2026","BB Rende Fácil","Rende Fácil","9993","95,53","Entrada"',
+    importType: 'transaction',
+    memberId: 'husband',
+    fallbackMonth: '2026-01'
+  });
+
+  assert.equal(result.rows.length, 1);
+  assert.equal(result.rows[0].description, 'BB Rende Fácil');
+  assert.equal(result.rows[0].amount, 95.53);
+  assert.equal(result.rows[0].type, 'income');
+});
+
 test('previewImportRows usa fallback quando conteúdo colado não tem filename', () => {
   const result = previewImportRows({
     fileName: '',
