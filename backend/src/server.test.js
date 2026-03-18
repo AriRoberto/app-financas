@@ -307,3 +307,102 @@ test('import commit persiste histórico e permite futura validação via reposit
     assert.deepEqual(persisted.importHistory[0].importedMonths, ['2026-05']);
   });
 });
+
+test('import commit bloqueia reprocessamento do mesmo arquivo', async () => {
+  await withServer(async (baseUrl) => {
+    await fetch(`${baseUrl}/api/transactions/seed`, { method: 'POST' });
+
+    const payload = {
+      fileName: 'extrato.csv',
+      content: 'Data lançamento;Histórico;Valor movimentado;Débito/Crédito\n18/04/2026;Mercado bairro;125,45;Débito',
+      importType: 'transaction',
+      memberId: 'wife',
+      month: '2026-04',
+      accountLabel: 'Conta BB teste'
+    };
+
+    const first = await fetch(`${baseUrl}/api/imports/commit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    assert.equal(first.status, 200);
+
+    const second = await fetch(`${baseUrl}/api/imports/commit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    assert.equal(second.status, 409);
+    const secondData = await second.json();
+    assert.match(secondData.message, /já foi processado/i);
+  });
+});
+
+test('limpar histórico remove apenas o histórico visual e preserva deduplicação', async () => {
+  await withServer(async (baseUrl) => {
+    await fetch(`${baseUrl}/api/transactions/seed`, { method: 'POST' });
+
+    const payload = {
+      fileName: 'extrato.csv',
+      content: 'data,descricao,valor\n2026-05-02,Freelance,900.00',
+      importType: 'income',
+      memberId: 'husband',
+      month: '2026-05'
+    };
+
+    await fetch(`${baseUrl}/api/imports/commit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    const clearRes = await fetch(`${baseUrl}/api/imports/history`, { method: 'DELETE' });
+    assert.equal(clearRes.status, 200);
+
+    const historyRes = await fetch(`${baseUrl}/api/imports/history`);
+    const historyData = await historyRes.json();
+    assert.equal(historyData.imports.length, 0);
+
+    const duplicateRes = await fetch(`${baseUrl}/api/imports/commit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    assert.equal(duplicateRes.status, 409);
+  });
+});
+
+test('limpar histórico e dados importados remove transações importadas e libera nova importação', async () => {
+  await withServer(async (baseUrl) => {
+    await fetch(`${baseUrl}/api/transactions/seed`, { method: 'POST' });
+
+    const payload = {
+      fileName: 'extrato.csv',
+      content: 'data,descricao,valor\n2026-05-02,Freelance,900.00',
+      importType: 'income',
+      memberId: 'husband',
+      month: '2026-05'
+    };
+
+    await fetch(`${baseUrl}/api/imports/commit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    const clearRes = await fetch(`${baseUrl}/api/imports/history-and-data`, { method: 'DELETE' });
+    assert.equal(clearRes.status, 200);
+
+    const txRes = await fetch(`${baseUrl}/api/transactions?member=husband&month=2026-05&from=2026-05-01&to=2026-05-31`);
+    const txData = await txRes.json();
+    assert.equal(txData.transactions.length, 0);
+
+    const retryRes = await fetch(`${baseUrl}/api/imports/commit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    assert.equal(retryRes.status, 200);
+  });
+});

@@ -106,3 +106,26 @@ th { font-size: .82rem; text-transform: uppercase; letter-spacing: .05em; color:
   .transaction-details dl { grid-template-columns: 1fr; }
   .hero-side { text-align: left; }
 }
+
+.transaction-section-body {
+  max-height: 760px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.collapsed-placeholder {
+  border: 1px dashed #c7d2e6;
+  border-radius: 16px;
+  padding: 18px;
+  color: #5f6f8f;
+  background: #fbfdff;
+}
+
+.inline-warning {
+  border: 1px solid #fde68a;
+  background: #fffbeb;
+  color: #92400e;
+  border-radius: 14px;
+  padding: 10px 12px;
+  font-weight: 600;
+}

@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import cors from 'cors';
 import express from 'express';
 import { AispClient } from './openfinance/aisp-client.js';
@@ -188,7 +189,8 @@ function cloneSampleTransactions() {
 
 const defaultFinanceState = {
   transactions: cloneSampleTransactions(),
-  importHistory: []
+  importHistory: [],
+  importRegistry: []
 };
 
 const persistedFinanceState = financeRepository.loadSnapshot(defaultFinanceState);
@@ -196,6 +198,7 @@ const persistedFinanceState = financeRepository.loadSnapshot(defaultFinanceState
 let transactions = persistedFinanceState.transactions.map((item) => enrichTransaction(item));
 let investments = [];
 let importHistory = persistedFinanceState.importHistory || [];
+let importRegistry = persistedFinanceState.importRegistry || [];
 
 function endOfCurrentYear() {
   const now = new Date();
@@ -550,6 +553,22 @@ function hasImportedFingerprint(fingerprint) {
   return transactions.some((item) => item.importFingerprint === fingerprint);
 }
 
+
+function buildImportedFileFingerprint({ fileName, content, importerKey, memberId, accountId, referencePeriod }) {
+  return crypto.createHash('sha256').update(JSON.stringify({
+    fileName: String(fileName || '').trim().toLowerCase(),
+    content: String(content || ''),
+    importerKey,
+    memberId,
+    accountId,
+    referencePeriod
+  })).digest('hex');
+}
+
+function findImportedFile(fileFingerprint) {
+  return importRegistry.find((item) => item.fileFingerprint === fileFingerprint) || null;
+}
+
 function buildImportedTransaction(previewItem) {
   return enrichTransaction({
     id: `imp-${Date.now()}-${Math.floor(Math.random() * 100000)}`,
@@ -573,7 +592,7 @@ function buildImportedTransaction(previewItem) {
 }
 
 function persistFinanceSnapshot(reason, extra = {}) {
-  financeRepository.saveSnapshot({ transactions, importHistory });
+  financeRepository.saveSnapshot({ transactions, importHistory, importRegistry });
   console.info('[finance-store] snapshot saved', { reason, ...extra, transactions: transactions.length, importHistory: importHistory.length });
 }
 
@@ -635,6 +654,7 @@ app.delete('/api/transactions', (_req, res) => {
   transactions = [];
   investments = [];
   importHistory = [];
+  importRegistry = [];
   persistFinanceSnapshot('transactions_cleared');
   res.json({ message: 'Todos os lançamentos removidos.', transactionsCount: 0 });
 });
@@ -642,7 +662,8 @@ app.delete('/api/transactions', (_req, res) => {
 app.post('/api/transactions/seed', (_req, res) => {
   const resetState = financeRepository.resetSnapshot(defaultFinanceState);
   transactions = resetState.transactions.map((item) => enrichTransaction(item));
-  importHistory = resetState.importHistory;
+  importHistory = resetState.importHistory || [];
+  importRegistry = resetState.importRegistry || [];
   seedInvestmentsFromTransactions();
   console.info('[imports] sample data restored', { transactions: transactions.length });
   res.json({ message: 'Dados de exemplo restaurados.', transactionsCount: transactions.length });
@@ -650,6 +671,22 @@ app.post('/api/transactions/seed', (_req, res) => {
 
 app.get('/api/imports/history', (_req, res) => {
   res.json({ imports: importHistory.slice().reverse() });
+});
+
+app.delete('/api/imports/history', (_req, res) => {
+  importHistory = [];
+  persistFinanceSnapshot('imports_history_cleared');
+  res.json({ message: 'Histórico visual limpo. Metadados de deduplicação e dados importados foram preservados.' });
+});
+
+app.delete('/api/imports/history-and-data', (_req, res) => {
+  const importedTransactionIds = new Set(importRegistry.flatMap((item) => item.transactionIds || []));
+  transactions = transactions.filter((item) => !importedTransactionIds.has(item.id) && item.importOrigin !== 'manual-file');
+  investments = investments.filter((item) => !importedTransactionIds.has(item.sourceTransactionId));
+  importHistory = [];
+  importRegistry = [];
+  persistFinanceSnapshot('imports_history_and_data_cleared');
+  res.json({ message: 'Histórico e dados importados foram removidos com sucesso.' });
 });
 
 app.post('/api/imports/preview', (req, res) => {
@@ -681,12 +718,24 @@ app.post('/api/imports/preview', (req, res) => {
       referencePeriod
     });
 
+    const fileFingerprint = buildImportedFileFingerprint({
+      fileName: safeFileName,
+      content,
+      importerKey: preview.importer.key,
+      memberId: normalizedMemberId,
+      accountId: preview.rows[0]?.accountId || accountId || '',
+      referencePeriod: referencePeriod || preview.rows[0]?.referencePeriod || ''
+    });
+    const duplicateFile = findImportedFile(fileFingerprint);
+
     return res.json({
       fileName: safeFileName,
       format: preview.format,
       importType,
       memberId: normalizedMemberId,
       bank: preview.importer,
+      duplicateFile: Boolean(duplicateFile),
+      duplicateFileMessage: duplicateFile ? 'Este arquivo já foi importado anteriormente para este membro/conta/período.' : '',
       rows: preview.rows,
       summary: {
         totalRows: preview.rows.length,
@@ -727,18 +776,35 @@ app.post('/api/imports/commit', (req, res) => {
       referencePeriod
     });
 
+    const fileFingerprint = buildImportedFileFingerprint({
+      fileName: safeFileName,
+      content,
+      importerKey: preview.importer.key,
+      memberId: normalizedMemberId,
+      accountId: preview.rows[0]?.accountId || accountId || '',
+      referencePeriod: referencePeriod || preview.rows[0]?.referencePeriod || ''
+    });
+
+    if (findImportedFile(fileFingerprint)) {
+      return res.status(409).json({ message: 'Este arquivo já foi processado anteriormente. Nenhum dado novo foi importado.' });
+    }
+
     let imported = 0;
     let duplicates = 0;
+    let ignored = 0;
     const importedMonths = new Set();
+    const importedTransactionIds = [];
 
     for (const row of preview.rows) {
       if (hasImportedFingerprint(row.fingerprint)) {
         duplicates += 1;
+        ignored += 1;
         continue;
       }
 
       const transaction = buildImportedTransaction(row);
       transactions = [transaction, ...transactions];
+      importedTransactionIds.push(transaction.id);
       upsertInvestmentFromReserve(transaction);
       importedMonths.add(transaction.month);
       imported += 1;
@@ -754,13 +820,32 @@ app.post('/api/imports/commit', (req, res) => {
         bankKey: preview.importer.key,
         bankName: preview.importer.label,
         importedRows: imported,
+        ignoredRows: ignored,
         duplicateRows: duplicates,
         importedMonths: [...importedMonths].sort(),
+        accountId: preview.rows[0]?.accountId || accountId || '',
+        accountLabel: preview.rows[0]?.accountLabel || accountLabel || '',
+        fileFingerprint,
+        transactionIds: importedTransactionIds,
         createdAt: new Date().toISOString(),
         source: 'manual-file'
       },
       ...importHistory
     ];
+
+    importRegistry = [{
+      id: `registry-${Date.now()}`,
+      fileName: safeFileName,
+      fileFingerprint,
+      bankKey: preview.importer.key,
+      bankName: preview.importer.label,
+      memberId: normalizedMemberId,
+      accountId: preview.rows[0]?.accountId || accountId || '',
+      accountLabel: preview.rows[0]?.accountLabel || accountLabel || '',
+      referencePeriod: referencePeriod || preview.rows[0]?.referencePeriod || '',
+      transactionIds: importedTransactionIds,
+      createdAt: new Date().toISOString()
+    }, ...importRegistry];
 
     persistFinanceSnapshot('import_commit', { fileName: safeFileName, importedRows: imported, duplicateRows: duplicates });
     console.info('[imports] commit finished', { fileName: safeFileName, importedRows: imported, duplicateRows: duplicates, importedMonths: [...importedMonths] });
@@ -768,6 +853,7 @@ app.post('/api/imports/commit', (req, res) => {
     return res.json({
       message: imported ? `Importação concluída com sucesso. ${imported} registro(s) salvo(s).` : 'Nenhum novo registro foi importado.',
       importedRows: imported,
+      ignoredRows: ignored,
       duplicateRows: duplicates,
       totalRows: preview.rows.length,
       importedMonths: [...importedMonths].sort(),

@@ -123,6 +123,7 @@ export function createApp({ root, apiUrl }) {
     importHistory: [],
     importPreview: null,
     expandedTransactionId: '',
+    transactionsCollapsed: false,
     selectedChartCategory: '',
     transactionForm: { ...defaultTransactionForm },
     importForm: { ...defaultImportForm },
@@ -490,6 +491,7 @@ export function createApp({ root, apiUrl }) {
     return `
       <div class="stack-sm import-preview">
         <p><strong>Banco detectado:</strong> ${esc(state.importPreview.bank?.label || '-')} · <strong>Linhas válidas:</strong> ${esc(state.importPreview.summary?.totalRows || 0)} · <strong>Duplicadas:</strong> ${esc(state.importPreview.summary?.duplicates || 0)}</p>
+        ${state.importPreview.duplicateFile ? `<div class="inline-warning">${esc(state.importPreview.duplicateFileMessage)}</div>` : ''}
         <div class="table-wrap">
           <table>
             <thead>
@@ -622,8 +624,8 @@ export function createApp({ root, apiUrl }) {
           ${renderDashboards()}
           <section class="workspace-grid secondary">
             <article class="card">
-              <div class="panel-heading compact"><div><p class="eyebrow">Lançamentos</p><h2>Lista com expand/collapse</h2></div></div>
-              ${renderTransactions()}
+              <div class="panel-heading compact"><div><p class="eyebrow">Lançamentos</p><h2>Lista com expand/collapse</h2><small>${state.transactions.length} registro(s) no filtro atual</small></div><div class="inline-actions"><button class="ghost-button" data-action="toggle-transactions-section">${state.transactionsCollapsed ? 'Expandir lista' : 'Recolher lista'}</button></div></div>
+              ${state.transactionsCollapsed ? '<div class="collapsed-placeholder">A lista completa está recolhida para priorizar os dashboards e o resumo. Expanda quando quiser analisar os detalhes.</div>' : `<div class="transaction-section-body">${renderTransactions()}</div>`}
             </article>
             <article class="card compact-side">
               <div class="panel-heading compact"><div><p class="eyebrow">Análises auxiliares</p><h2>Investimentos e recuperação</h2></div></div>
@@ -633,7 +635,7 @@ export function createApp({ root, apiUrl }) {
           </section>
           ${renderForms()}
           <section class="workspace-grid secondary">
-            <article class="card"><div class="panel-heading compact"><div><p class="eyebrow">Histórico</p><h2>Importações realizadas</h2></div></div>${renderImportHistory()}</article>
+            <article class="card"><div class="panel-heading compact"><div><p class="eyebrow">Histórico</p><h2>Importações realizadas</h2></div><div class="inline-actions"><button class="ghost-button" data-action="clear-history">Limpar histórico</button><button class="ghost-button danger" data-action="clear-history-and-data">Limpar histórico e dados</button></div></div>${renderImportHistory()}</article>
           </section>
         `}
       </div>
@@ -667,6 +669,22 @@ export function createApp({ root, apiUrl }) {
     if (action === 'toggle-transaction') {
       state.expandedTransactionId = state.expandedTransactionId === element.dataset.id ? '' : element.dataset.id;
       render();
+      return;
+    }
+    if (action === 'toggle-transactions-section') {
+      state.transactionsCollapsed = !state.transactionsCollapsed;
+      render();
+      return;
+    }
+    if (action === 'clear-history') {
+      if (!window.confirm('Deseja limpar apenas o histórico visual? Os dados importados e a proteção contra duplicidade serão preservados.')) return;
+      await runAction('clear-history', () => request('/api/imports/history', { method: 'DELETE' }), 'Histórico visual limpo com sucesso.');
+      return;
+    }
+    if (action === 'clear-history-and-data') {
+      if (!window.confirm('Deseja remover o histórico e também todos os dados importados por arquivos? Lançamentos manuais serão preservados.')) return;
+      await runAction('clear-history-and-data', () => request('/api/imports/history-and-data', { method: 'DELETE' }), 'Histórico e dados importados removidos com sucesso.');
+      state.importPreview = null;
       return;
     }
     if (action === 'delete-transaction') {
@@ -712,6 +730,10 @@ export function createApp({ root, apiUrl }) {
         accountId: state.importForm.accountId || '',
         accountLabel: state.importForm.accountLabel || ''
       };
+      if (state.importPreview?.duplicateFile) {
+        setBanner('error', state.importPreview.duplicateFileMessage || 'Este arquivo já foi processado anteriormente.');
+        return;
+      }
       const result = await runAction('commit-import', () => request('/api/imports/commit', { method: 'POST', body: JSON.stringify(payload) }));
       state.importPreview = null;
       setBanner('success', result.message || 'Importação concluída com sucesso.');
