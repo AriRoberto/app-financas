@@ -1,1050 +1,631 @@
-import { useEffect, useMemo, useState } from 'react';
-
 const currency = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3333';
 
-function currentMonth() {
-  return new Date().toISOString().slice(0, 7);
-}
-
-function getPresetRange(preset) {
-  const now = new Date();
-  const yyyy = now.getUTCFullYear();
-  const mm = String(now.getUTCMonth() + 1).padStart(2, '0');
-  if (preset === 'month') {
-    return { from: `${yyyy}-${mm}-01`, to: `${yyyy}-${mm}-31` };
-  }
-  if (preset === 'last3months') {
-    const fromDate = new Date(Date.UTC(yyyy, now.getUTCMonth() - 2, 1));
-    const from = `${fromDate.getUTCFullYear()}-${String(fromDate.getUTCMonth() + 1).padStart(2, '0')}-01`;
-    return { from, to: `${yyyy}-${mm}-31` };
-  }
-  if (preset === 'year') {
-    return { from: `${yyyy}-01-01`, to: `${yyyy}-12-31` };
-  }
-  return { from: '', to: '' };
-}
-
-
-function capitalizeFirst(text) {
-  if (!text) return '';
-  return text.charAt(0).toUpperCase() + text.slice(1);
-}
-
-function memberLabel(memberId) {
-  const labels = {
-    husband: 'Marido',
-    wife: 'Esposa',
-    family: 'Familia'
-  };
-  return labels[memberId] || capitalizeFirst(memberId);
-}
-
-function typeLabel(type) {
-  const labels = {
-    expense: 'Despesa',
-    income: 'Receita',
-    investment: 'Investimento'
-  };
-  return labels[type] || type;
-}
-
-function termLabel(term) {
-  const labels = {
-    short: 'Curto prazo',
-    medium: 'Médio prazo',
-    long: 'Longo prazo'
-  };
-  return labels[term] || '-';
-}
-
-
-function recoverySeverityClass(level) {
-  if (level >= 3) return 'critical';
-  if (level >= 2) return 'risk';
-  if (level >= 1) return 'attention';
-  return 'stable';
-}
-
-const initialForm = {
+const defaultTransactionForm = {
   memberId: 'husband',
   type: 'expense',
-  category: 'Alimentação',
+  category: '',
   description: '',
   amount: '',
-  month: currentMonth(),
+  month: new Date().toISOString().slice(0, 7),
   date: '',
   dueDate: '',
   isInvestmentReserve: false
 };
 
-const initialImportState = {
+const defaultImportForm = {
   memberId: 'husband',
   importType: 'transaction',
+  month: new Date().toISOString().slice(0, 7),
   fileName: '',
   content: ''
 };
 
-const initialImportProgress = {
-  selected: { label: 'Arquivo selecionado', status: 'idle', detail: '' },
-  read: { label: 'Arquivo lido', status: 'idle', detail: '' },
-  preview: { label: 'Pré-visualização gerada', status: 'idle', detail: '' },
-  upload: { label: 'Envio ao backend', status: 'idle', detail: '' },
-  persist: { label: 'Persistência concluída', status: 'idle', detail: '' },
-  refresh: { label: 'Interface atualizada', status: 'idle', detail: '' }
-};
+function memberLabel(memberId) {
+  return {
+    husband: 'Marido',
+    wife: 'Esposa',
+    family: 'Família',
+    all: 'Todos'
+  }[memberId] || memberId;
+}
 
-function App() {
-  const [dashboard, setDashboard] = useState(null);
-  const [suggestions, setSuggestions] = useState([]);
-  const [members, setMembers] = useState([]);
-  const [expenseCategories, setExpenseCategories] = useState([]);
-  const [incomeCategories, setIncomeCategories] = useState([]);
-  const [investmentCategories, setInvestmentCategories] = useState([]);
-  const [descriptionTemplates, setDescriptionTemplates] = useState([]);
-  const [months, setMonths] = useState([]);
-  const [transactions, setTransactions] = useState([]);
-  const [investments, setInvestments] = useState({ total: 0, investments: [] });
-  const [form, setForm] = useState(initialForm);
-  const [selectedMonth, setSelectedMonth] = useState(currentMonth());
-  const [selectedMember, setSelectedMember] = useState('all');
-  const [selectedTerm, setSelectedTerm] = useState('all');
-  const [periodPreset, setPeriodPreset] = useState('month');
-  const [fromDate, setFromDate] = useState(getPresetRange('month').from);
-  const [toDate, setToDate] = useState(getPresetRange('month').to);
-  const [selectedCategoryKey, setSelectedCategoryKey] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [clearing, setClearing] = useState(false);
-  const [error, setError] = useState('');
-  const [successMessage, setSuccessMessage] = useState('');
-  const [connectingBank, setConnectingBank] = useState(false);
-  const [bankInstitution, setBankInstitution] = useState('BB');
-  const [bankInstitutions, setBankInstitutions] = useState([]);
-  const [bankConnections, setBankConnections] = useState([]);
-  const [recoveryPlan, setRecoveryPlan] = useState(null);
-  const [importForm, setImportForm] = useState(initialImportState);
-  const [importPreview, setImportPreview] = useState(null);
-  const [importingFile, setImportingFile] = useState(false);
-  const [importHistory, setImportHistory] = useState([]);
-  const [importProgress, setImportProgress] = useState(initialImportProgress);
-  const [toasts, setToasts] = useState([]);
+function typeLabel(type) {
+  return {
+    income: 'Receita',
+    expense: 'Despesa',
+    investment: 'Investimento'
+  }[type] || type;
+}
 
-  const currentCategories = useMemo(() => {
-    if (form.type === 'income') return incomeCategories;
-    if (form.type === 'investment') return investmentCategories;
-    return expenseCategories;
-  }, [form.type, incomeCategories, investmentCategories, expenseCategories]);
+function termLabel(term) {
+  return {
+    short: 'Curto prazo',
+    medium: 'Médio prazo',
+    long: 'Longo prazo'
+  }[term] || '-';
+}
 
+function esc(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
+}
 
-  async function fetchNoStore(url, options = {}) {
-    return fetch(url, { cache: 'no-store', ...options });
+async function parseJson(response) {
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.message || 'Falha na comunicação com a API.');
+  }
+  return payload;
+}
+
+export function createApp({ root, apiUrl }) {
+  const state = {
+    loading: true,
+    busy: false,
+    error: '',
+    success: '',
+    members: [],
+    expenseCategories: [],
+    incomeCategories: [],
+    investmentCategories: [],
+    months: [],
+    selectedMember: 'all',
+    selectedMonth: new Date().toISOString().slice(0, 7),
+    dashboard: null,
+    transactions: [],
+    investments: { total: 0, investments: [] },
+    recoveryPlan: null,
+    bankInstitutions: [],
+    bankInstitution: 'BB',
+    bankConnections: [],
+    importHistory: [],
+    importPreview: null,
+    transactionForm: { ...defaultTransactionForm },
+    importForm: { ...defaultImportForm }
+  };
+
+  function currentCategoryOptions() {
+    if (state.transactionForm.type === 'income') return state.incomeCategories;
+    if (state.transactionForm.type === 'investment') return state.investmentCategories;
+    return state.expenseCategories;
   }
 
-
-  function resetImportProgress() {
-    setImportProgress(initialImportProgress);
+  function setMessage(type, message) {
+    if (type === 'error') {
+      state.error = message;
+      state.success = '';
+    } else {
+      state.success = message;
+      state.error = '';
+    }
+    render();
   }
 
-  function updateImportProgress(step, status, detail = '') {
-    setImportProgress((old) => ({
-      ...old,
-      [step]: {
-        ...old[step],
-        status,
-        detail
-      }
+  async function request(path, options) {
+    return parseJson(await fetch(`${apiUrl}${path}`, {
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json', ...(options?.headers || {}) },
+      ...options
     }));
   }
 
-  function pushToast(type, message) {
-    const id = `${Date.now()}-${Math.random()}`;
-    setToasts((old) => [...old, { id, type, message }]);
-    window.setTimeout(() => {
-      setToasts((old) => old.filter((item) => item.id !== id));
-    }, 4500);
-  }
-
-  async function loadDescriptionTemplates(type, category) {
-    const response = await fetchNoStore(`${API_URL}/api/description-templates?type=${type}&category=${encodeURIComponent(category || '')}&ts=${Date.now()}`);
-    const data = await response.json();
-    setDescriptionTemplates(data.templates || []);
-  }
-
-  function queryParams(month = selectedMonth) {
-    const params = new URLSearchParams({
-      member: selectedMember,
-      term: selectedTerm,
-      ts: Date.now().toString()
-    });
-
-    if (periodPreset === 'month') {
-      params.set('month', month);
-      params.set('from', `${month}-01`);
-      params.set('to', `${month}-31`);
-    } else {
-      if (fromDate) params.set('from', fromDate);
-      if (toDate) params.set('to', toDate);
-    }
-
-    return params.toString();
-  }
-
   async function loadStaticData() {
-    const [membersRes, categoriesRes, institutionsRes] = await Promise.all([
-      fetchNoStore(`${API_URL}/api/members?ts=${Date.now()}`),
-      fetchNoStore(`${API_URL}/api/categories?ts=${Date.now()}`),
-      fetchNoStore(`${API_URL}/api/banks/institutions?ts=${Date.now()}`)
+    const [membersData, categoriesData, institutionsData] = await Promise.all([
+      request('/api/members'),
+      request('/api/categories'),
+      request('/api/banks/institutions')
     ]);
 
-    const membersData = await membersRes.json();
-    const categoriesData = await categoriesRes.json();
-    const institutionsData = await institutionsRes.json();
+    state.members = membersData.members || [];
+    state.expenseCategories = categoriesData.expenseCategories || [];
+    state.incomeCategories = categoriesData.incomeCategories || [];
+    state.investmentCategories = categoriesData.investmentCategories || [];
+    state.bankInstitutions = institutionsData.institutions || [];
 
-    setMembers(membersData.members || []);
-    setExpenseCategories(categoriesData.expenseCategories || categoriesData.categories || []);
-    setIncomeCategories(categoriesData.incomeCategories || []);
-    setInvestmentCategories(categoriesData.investmentCategories || []);
-    setBankInstitutions(institutionsData.institutions || []);
-
-    const category = categoriesData.expenseCategories?.[0] || 'Outros';
-    setForm((old) => ({ ...old, memberId: membersData.members?.[0]?.id || 'husband', category }));
-    setImportForm((old) => ({ ...old, memberId: membersData.members?.[0]?.id || 'husband' }));
-    await loadDescriptionTemplates('expense', category);
+    const firstMember = state.members[0]?.id || 'husband';
+    state.transactionForm.memberId = firstMember;
+    state.importForm.memberId = firstMember;
+    state.transactionForm.category = currentCategoryOptions()[0] || '';
+    state.bankInstitution = state.bankInstitutions[0]?.key || state.bankInstitution;
   }
 
-  async function loadData(month = selectedMonth) {
-    const params = queryParams(month);
-    const investmentsParams = new URLSearchParams({
-      member: selectedMember,
-      ts: Date.now().toString()
-    });
+  async function loadDynamicData() {
+    const member = state.selectedMember || 'all';
+    const month = state.selectedMonth;
+    const monthParams = new URLSearchParams({ member, month, from: `${month}-01`, to: `${month}-31` });
+    const investmentsParams = new URLSearchParams({ member, from: `${month}-01`, to: `${month}-31` });
 
-    if (periodPreset === 'month') {
-      investmentsParams.set('from', `${month}-01`);
-      investmentsParams.set('to', `${month}-31`);
-    } else {
-      if (fromDate) investmentsParams.set('from', fromDate);
-      if (toDate) investmentsParams.set('to', toDate);
-    }
-
-    const [dashboardRes, suggestionsRes, transactionsRes, monthsRes, investmentsRes, bankConnectionsRes, recoveryPlanRes, importHistoryRes] = await Promise.all([
-      fetchNoStore(`${API_URL}/api/dashboard?${params}`),
-      fetchNoStore(`${API_URL}/api/suggestions?${params}`),
-      fetchNoStore(`${API_URL}/api/transactions?${params}`),
-      fetchNoStore(`${API_URL}/api/months?member=${selectedMember}&ts=${Date.now()}`),
-      fetchNoStore(`${API_URL}/api/investments?${investmentsParams.toString()}`),
-      fetchNoStore(`${API_URL}/api/banks/connections?ts=${Date.now()}`),
-      fetchNoStore(`${API_URL}/api/recovery/plan?${params}`),
-      fetchNoStore(`${API_URL}/api/imports/history?ts=${Date.now()}`)
+    const [dashboardData, transactionsData, monthsData, investmentsData, recoveryData, connectionsData, importsData] = await Promise.all([
+      request(`/api/dashboard?${monthParams}`),
+      request(`/api/transactions?${monthParams}`),
+      request(`/api/months?member=${member}`),
+      request(`/api/investments?${investmentsParams}`),
+      request(`/api/recovery/plan?${monthParams}`),
+      request('/api/banks/connections'),
+      request('/api/imports/history')
     ]);
 
-    const dashboardData = await dashboardRes.json();
-    const suggestionsData = await suggestionsRes.json();
-    const transactionsData = await transactionsRes.json();
-    const monthsData = await monthsRes.json();
-    const investmentsJson = await investmentsRes.json();
-    const connectionsJson = await bankConnectionsRes.json();
-    const recoveryPlanJson = await recoveryPlanRes.json();
-    const importHistoryJson = await importHistoryRes.json();
+    state.dashboard = dashboardData;
+    state.transactions = transactionsData.transactions || [];
+    state.months = monthsData.months || [];
+    state.investments = investmentsData;
+    state.recoveryPlan = recoveryData;
+    state.bankConnections = connectionsData.connections || [];
+    state.importHistory = importsData.imports || [];
 
-    console.info('[imports] data reloaded', {
-      month,
-      transactions: transactionsData.transactions?.length || 0,
-      imports: importHistoryJson.imports?.length || 0
-    });
+    if (!state.months.includes(state.selectedMonth) && state.months[0]) {
+      state.selectedMonth = state.months[state.months.length - 1];
+    }
+  }
 
-    setDashboard(dashboardData);
-    setSuggestions(suggestionsData.suggestions || []);
-    setTransactions(transactionsData.transactions || []);
-    setMonths(monthsData.months || []);
-    setInvestments(investmentsJson);
-    setBankConnections(connectionsJson.connections || []);
-    setRecoveryPlan(recoveryPlanJson);
-    setImportHistory(importHistoryJson.imports || []);
+  async function refreshData() {
+    state.loading = true;
+    render();
+    try {
+      await loadDynamicData();
+      state.loading = false;
+      render();
+    } catch (error) {
+      state.loading = false;
+      setMessage('error', error.message);
+    }
   }
 
   async function boot() {
-    setLoading(true);
-    setError('');
-    setSuccessMessage('');
     try {
       await loadStaticData();
-      await loadData(selectedMonth);
-    } catch (err) {
-      setError(err.message || 'Erro ao carregar dados.');
-    } finally {
-      setLoading(false);
+      await loadDynamicData();
+      state.loading = false;
+      render();
+    } catch (error) {
+      state.loading = false;
+      setMessage('error', error.message);
     }
   }
 
-  useEffect(() => {
-    boot();
-  }, []);
+  async function runBusy(task, successMessage) {
+    state.busy = true;
+    render();
+    try {
+      const result = await task();
+      if (successMessage) {
+        setMessage('success', successMessage);
+      }
+      await loadDynamicData();
+      state.busy = false;
+      render();
+      return result;
+    } catch (error) {
+      state.busy = false;
+      setMessage('error', error.message);
+      throw error;
+    }
+  }
 
-  useEffect(() => {
-    if (!loading) loadData(selectedMonth).catch((err) => setError(err.message));
-  }, [selectedMember, selectedTerm, fromDate, toDate]);
-
-  const categoriesByType = useMemo(() => {
-    const grouped = {
-      expense: {},
-      income: {},
-      investment: {}
-    };
-
-    transactions.forEach((item) => {
-      if (!grouped[item.type]) return;
-      grouped[item.type][item.category] = (grouped[item.type][item.category] || 0) + item.amount;
-    });
-
-    const normalize = (type) => {
-      const rows = Object.entries(grouped[type])
-        .map(([category, total]) => ({ type, category, total }))
-        .sort((a, b) => b.total - a.total);
-
-      const totalByType = rows.reduce((sum, row) => sum + row.total, 0);
-
-      return rows.map((row) => ({
-        ...row,
-        percentage: totalByType > 0 ? Number(((row.total / totalByType) * 100).toFixed(2)) : 0,
-        totalByType,
-        key: `${row.type}:${row.category}`
-      }));
-    };
-
+  function transactionPayload() {
     return {
-      expense: normalize('expense'),
-      income: normalize('income'),
-      investment: normalize('investment')
+      ...state.transactionForm,
+      amount: Number(state.transactionForm.amount)
     };
-  }, [transactions]);
-
-  const allCategoryRows = useMemo(
-    () => [...categoriesByType.expense, ...categoriesByType.income, ...categoriesByType.investment],
-    [categoriesByType]
-  );
-
-  useEffect(() => {
-    if (!allCategoryRows.length) {
-      setSelectedCategoryKey('');
-      return;
-    }
-
-    const exists = allCategoryRows.some((item) => item.key === selectedCategoryKey);
-    if (!exists) setSelectedCategoryKey(allCategoryRows[0].key);
-  }, [allCategoryRows, selectedCategoryKey]);
-
-
-
-  async function openPluggyWidget(connectToken, state) {
-    if (!window.PluggyConnect) {
-      throw new Error('Pluggy Connect indisponível no navegador.');
-    }
-
-    return new Promise((resolve, reject) => {
-      const pluggy = new window.PluggyConnect({
-        connectToken,
-        includeSandbox: true,
-        onSuccess: async (itemData) => {
-          try {
-            const itemId = itemData?.itemId || itemData?.item?.id;
-            const callbackRes = await fetchNoStore(`${API_URL}/api/banks/callback?state=${encodeURIComponent(state)}&itemId=${encodeURIComponent(itemId || '')}`);
-            if (!callbackRes.ok) throw new Error('Falha ao concluir callback com item Pluggy.');
-            resolve();
-          } catch (err) {
-            reject(err);
-          }
-        },
-        onError: () => reject(new Error('Falha no fluxo Pluggy Connect.')),
-        onClose: () => reject(new Error('Conexão cancelada pelo usuário.'))
-      });
-      pluggy.init();
-    });
   }
 
-  async function handleConnectBank() {
-    setConnectingBank(true);
-    setError('');
-    setSuccessMessage('');
-    try {
-      const response = await fetchNoStore(`${API_URL}/api/banks/connect`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ institution_key: bankInstitution, scopes: ['accounts', 'transactions'] })
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.message || 'Não foi possível conectar o banco.');
-
-      if (data.status === 'UNSUPPORTED') {
-        await loadData(selectedMonth);
-        throw new Error(data.message || 'Instituição ainda não suportada pelo agregador.');
-      }
-
-      if (data.redirectUrl) {
-        const callbackResponse = await fetchNoStore(data.redirectUrl);
-        if (!callbackResponse.ok) {
-          throw new Error('Falha ao concluir consentimento da conexão bancária.');
-        }
-      } else if (data.connectToken && data.state) {
-        await openPluggyWidget(data.connectToken, data.state);
-      } else {
-        throw new Error('Resposta inválida ao iniciar conexão bancária.');
-      }
-
-      await loadData(selectedMonth);
-    } catch (err) {
-      setError(err.message || 'Erro ao conectar banco.');
-    } finally {
-      setConnectingBank(false);
-    }
-  }
-
-  async function handleRevokeConnection(connectionId) {
-    setSuccessMessage('');
-    try {
-      const response = await fetchNoStore(`${API_URL}/api/banks/${connectionId}/revoke`, { method: 'POST' });
-      if (!response.ok) throw new Error('Falha ao revogar conexão.');
-      await loadData(selectedMonth);
-    } catch (err) {
-      setError(err.message || 'Erro ao revogar conexão.');
-    }
-  }
-
-  async function handleSyncConnection(connectionId) {
-    setSuccessMessage('');
-    try {
-      const response = await fetchNoStore(`${API_URL}/api/banks/${connectionId}/sync`, { method: 'POST' });
-      if (!response.ok) throw new Error('Falha ao sincronizar conexão.');
-      await loadData(selectedMonth);
-    } catch (err) {
-      setError(err.message || 'Erro ao sincronizar conexão.');
-    }
-  }
-
-  async function submitTransaction(event) {
-    event.preventDefault();
-    setSaving(true);
-    setError('');
-    setSuccessMessage('');
-
-    try {
-      const payload = {
-        ...form,
-        amount: Number(form.amount),
-        isInvestmentReserve: form.type === 'expense' && (form.isInvestmentReserve || form.category === 'Reserva para investir')
-      };
-      const response = await fetchNoStore(`${API_URL}/api/transactions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.message || 'Erro ao salvar.');
-      }
-
-      await loadData(selectedMonth);
-      setForm((old) => ({ ...old, description: '', amount: '', date: '', dueDate: '', isInvestmentReserve: false }));
-      setSuccessMessage('Lançamento salvo com sucesso.');
-    } catch (err) {
-      setError(err.message || 'Erro ao salvar.');
-    } finally {
-      setSaving(false);
-    }
-  }
-
-
-  async function handleClearDemoData() {
-    setSuccessMessage('');
-    const confirmed = window.confirm('Isso vai limpar todos os dados atuais (inclusive lançamentos reais). Deseja continuar?');
-    if (!confirmed) return;
-
-    setClearing(true);
-    setError('');
-
-    try {
-      const response = await fetchNoStore(`${API_URL}/api/transactions`, { method: 'DELETE' });
-      if (!response.ok) {
-        throw new Error('Não foi possível limpar os dados de teste.');
-      }
-      await loadData(selectedMonth);
-      setSuccessMessage('Dados limpos com sucesso.');
-    } catch (err) {
-      setError(err.message || 'Erro ao limpar os dados de teste.');
-    } finally {
-      setClearing(false);
-    }
-  }
-
-  async function handleRestoreDemoData() {
-    setError('');
-    setSuccessMessage('');
-    try {
-      const response = await fetchNoStore(`${API_URL}/api/transactions/seed`, { method: 'POST' });
-      if (!response.ok) {
-        throw new Error('Não foi possível restaurar os dados de exemplo.');
-      }
-      await loadData(selectedMonth);
-      setSuccessMessage('Dados de exemplo restaurados com sucesso.');
-    } catch (err) {
-      setError(err.message || 'Erro ao restaurar os dados de exemplo.');
-    }
-  }
-
-  async function handleImportFileSelection(event) {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    resetImportProgress();
-    updateImportProgress('selected', 'done', file.name);
-
-    const content = await file.text();
-    console.info('[imports] file selected', { name: file.name, size: file.size });
-    setImportForm((old) => ({ ...old, fileName: file.name, content }));
-    setImportPreview(null);
-    setSuccessMessage('');
-    updateImportProgress('read', 'done', `${content.length} caractere(s) lido(s)`);
-    pushToast('info', `Arquivo ${file.name} carregado para importação.`);
-  }
-
-  async function handlePreviewImport() {
-    setError('');
-    setSuccessMessage('');
-    updateImportProgress('preview', 'idle', '');
-    updateImportProgress('upload', 'idle', '');
-    updateImportProgress('persist', 'idle', '');
-    updateImportProgress('refresh', 'idle', '');
-
-    if (!importForm.content.trim()) {
-      setError('Selecione um arquivo CSV/JSON ou cole o conteúdo para pré-visualizar.');
-      return;
-    }
-
-    setImportingFile(true);
-    updateImportProgress('preview', 'loading', 'Interpretando arquivo');
-    try {
-      console.info('[imports] preview request', {
-        fileName: importForm.fileName || 'clipboard-import.csv',
-        memberId: importForm.memberId,
-        importType: importForm.importType
-      });
-
-      const response = await fetchNoStore(`${API_URL}/api/imports/preview`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...importForm,
-          month: selectedMonth
-        })
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.message || 'Falha ao pré-visualizar importação.');
-      console.info('[imports] preview response', { rows: data.summary?.totalRows || 0, duplicates: data.summary?.duplicates || 0, format: data.format });
-      setImportPreview(data);
-      setSuccessMessage(`Pré-visualização pronta: ${data.summary?.totalRows || 0} linha(s) interpretada(s).`);
-      updateImportProgress('preview', 'done', `${data.summary?.totalRows || 0} linha(s)`);
-      pushToast('success', `Pré-visualização gerada com ${data.summary?.totalRows || 0} registro(s).`);
-    } catch (err) {
-      updateImportProgress('preview', 'error', 'Falha na pré-visualização');
-      setError(err.message || 'Erro ao gerar pré-visualização.');
-      pushToast('error', err.message || 'Erro ao gerar pré-visualização.');
-    } finally {
-      setImportingFile(false);
-    }
-  }
-
-  async function handleConfirmImport() {
-    setError('');
-    setSuccessMessage('');
-    updateImportProgress('upload', 'idle', '');
-    updateImportProgress('persist', 'idle', '');
-    updateImportProgress('refresh', 'idle', '');
-
-    if (!importPreview?.rows?.length) {
-      setError('Faça a pré-visualização antes de confirmar a importação.');
-      return;
-    }
-
-    setImportingFile(true);
-    updateImportProgress('upload', 'loading', 'Enviando para o backend');
-    try {
-      console.info('[imports] commit request', { fileName: importForm.fileName || 'clipboard-import.csv', memberId: importForm.memberId, importType: importForm.importType, previewRows: importPreview.rows.length });
-      const response = await fetchNoStore(`${API_URL}/api/imports/commit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...importForm,
-          month: selectedMonth
-        })
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.message || 'Falha ao importar arquivo.');
-      console.info('[imports] commit response', data);
-      const nextMonth = data.importedMonths?.length ? data.importedMonths[data.importedMonths.length - 1] : selectedMonth;
-      updateImportProgress('upload', 'done', 'Payload aceito pelo backend');
-      updateImportProgress('persist', 'done', `${data.importedRows || 0} registro(s) persistido(s)`);
-      setImportPreview(null);
-      setImportForm((old) => ({ ...old, fileName: '', content: '' }));
-      if (periodPreset === 'month' && nextMonth) {
-        setSelectedMonth(nextMonth);
-      }
-      await loadData(nextMonth || selectedMonth);
-      updateImportProgress('refresh', 'done', 'Dashboard e lançamentos recarregados');
-      setSuccessMessage(data.message || `Importação concluída: ${data.importedRows || 0} registro(s).`);
-      pushToast('success', data.message || `Importação concluída: ${data.importedRows || 0} registro(s).`);
-      if (data.duplicateRows) pushToast('warning', `${data.duplicateRows} registro(s) duplicado(s) foram ignorados.`);
-    } catch (err) {
-      updateImportProgress('upload', 'error', 'Falha no envio');
-      updateImportProgress('persist', 'error', 'Persistência não concluída');
-      setError(err.message || 'Erro ao confirmar importação.');
-      pushToast('error', err.message || 'Erro ao confirmar importação.');
-    } finally {
-      setImportingFile(false);
-    }
-  }
-
-  function changePreset(nextPreset) {
-    setPeriodPreset(nextPreset);
-    const range = getPresetRange(nextPreset);
-    setFromDate(range.from);
-    setToDate(range.to);
-  }
-
-  const selectedCategoryData = useMemo(
-    () => allCategoryRows.find((item) => item.key === selectedCategoryKey) || null,
-    [allCategoryRows, selectedCategoryKey]
-  );
-
-  const pieStyle = useMemo(() => {
-    if (!selectedCategoryData) return { background: '#e2e8f0' };
-
-    const selectedPercent = selectedCategoryData.percentage;
-    const otherPercent = Math.max(0, 100 - selectedPercent);
-
-    return {
-      background: `conic-gradient(#2563eb 0% ${selectedPercent}%, #cbd5e1 ${selectedPercent}% ${selectedPercent + otherPercent}%)`
-    };
-  }, [selectedCategoryData]);
-
-  if (loading) return <main className="page"><p>Carregando...</p></main>;
-
-  return (
-    <main className="page">
-      <section className="hero">
-        <div>
-          <p className="badge">Multi-membro + Despesas + Investimentos</p>
-          <h1>Controle de Finanças Familiar</h1>
-        </div>
+  function renderSummaryCards() {
+    const dashboard = state.dashboard || {};
+    return `
+      <section class="card-grid">
+        <article class="card stat-card">
+          <span class="muted">Receitas</span>
+          <strong>${currency.format(dashboard.income || 0)}</strong>
+        </article>
+        <article class="card stat-card">
+          <span class="muted">Despesas</span>
+          <strong>${currency.format(dashboard.expenses || 0)}</strong>
+        </article>
+        <article class="card stat-card">
+          <span class="muted">Investimentos</span>
+          <strong>${currency.format(dashboard.investments || 0)}</strong>
+        </article>
+        <article class="card stat-card ${dashboard.balance >= 0 ? 'positive' : 'negative'}">
+          <span class="muted">Saldo</span>
+          <strong>${currency.format(dashboard.balance || 0)}</strong>
+        </article>
       </section>
+    `;
+  }
 
-      <section className="filters">
-        <label>Membro
-          <select value={selectedMember} onChange={(e) => setSelectedMember(e.target.value)}>
-            <option value="all">Todos</option>
-            {members.map((member) => <option key={member.id} value={member.id}>{memberLabel(member.id)}</option>)}
-          </select>
-        </label>
-        <label>Prazo
-          <select value={selectedTerm} onChange={(e) => setSelectedTerm(e.target.value)}>
-            <option value="all">Todos</option>
-            <option value="short">Curto</option>
-            <option value="medium">Médio</option>
-            <option value="long">Longo</option>
-          </select>
-        </label>
-        <label>Período
-          <select value={periodPreset} onChange={(e) => changePreset(e.target.value)}>
-            <option value="month">Mês atual</option>
-            <option value="last3months">Últimos 3 meses</option>
-            <option value="year">Ano corrente</option>
-            <option value="custom">Customizado</option>
-          </select>
-        </label>
-        <label>De
-          <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
-        </label>
-        <label>Até
-          <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
-        </label>
-        <label>Mês analisado
-          <select value={selectedMonth} onChange={(e) => { setSelectedMonth(e.target.value); loadData(e.target.value); }}>
-            {(months.length ? months : [selectedMonth]).map((month) => <option key={month} value={month}>{month}</option>)}
-          </select>
-        </label>
-      </section>
+  function renderOptions(items, selectedValue, formatter) {
+    return items.map((item) => {
+      const value = typeof item === 'string' ? item : item.id || item.key || item.value;
+      const label = formatter ? formatter(item) : (typeof item === 'string' ? item : item.name || item.label || value);
+      return `<option value="${esc(value)}" ${String(value) === String(selectedValue) ? 'selected' : ''}>${esc(label)}</option>`;
+    }).join('');
+  }
 
-      <div className="toast-stack">
-        {toasts.map((toast) => <div key={toast.id} className={`toast ${toast.type}`}>{toast.message}</div>)}
+  function renderTransactions() {
+    if (!state.transactions.length) {
+      return '<p class="empty-state">Nenhum lançamento encontrado para o filtro atual.</p>';
+    }
+
+    return `
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Data</th>
+              <th>Membro</th>
+              <th>Tipo</th>
+              <th>Categoria</th>
+              <th>Descrição</th>
+              <th>Prazo</th>
+              <th>Valor</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${state.transactions.map((transaction) => `
+              <tr>
+                <td>${esc(transaction.date)}</td>
+                <td>${esc(memberLabel(transaction.memberId))}</td>
+                <td>${esc(typeLabel(transaction.type))}</td>
+                <td>${esc(transaction.category)}</td>
+                <td>${esc(transaction.description)}</td>
+                <td>${esc(termLabel(transaction.term))}</td>
+                <td>${currency.format(transaction.amount)}</td>
+                <td><button class="ghost-button" data-action="delete-transaction" data-id="${esc(transaction.id)}">Excluir</button></td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
       </div>
+    `;
+  }
 
-      {error ? <p className="error">{error}</p> : null}
-      {successMessage ? <p className="success">{successMessage}</p> : null}
+  function renderInvestments() {
+    const rows = state.investments?.investments || [];
+    return `
+      <div class="stack-sm">
+        <p><strong>Total investido:</strong> ${currency.format(state.investments?.total || 0)}</p>
+        ${rows.length ? `
+          <ul class="simple-list">
+            ${rows.map((item) => `<li>${esc(item.date)} · ${esc(memberLabel(item.memberId))} · ${currency.format(item.amount)} · ${esc(item.type)}</li>`).join('')}
+          </ul>
+        ` : '<p class="empty-state">Nenhum investimento encontrado.</p>'}
+      </div>
+    `;
+  }
 
-      {recoveryPlan?.entryPoints?.passive?.shouldSurface ? (
-        <section className={`panel recovery-alert ${recoverySeverityClass(recoveryPlan.severity)}`}>
-          <h2>Plano de recuperação financeira</h2>
-          <p>{recoveryPlan.entryPoints.passive.message}</p>
-          <p><strong>Próxima ação recomendada:</strong> {recoveryPlan.nextBestAction?.title}</p>
-        </section>
-      ) : null}
-
-
-      <section className="panel bank-panel">
-        <h2>Conectar banco (Open Finance / AISP)</h2>
-        <p className="panel-help">Conexão com consentimento explícito: BB, Itaú, CEF, Santander, Nubank ou Bradesco.</p>
-        <div className="bank-connect-row">
-          <select value={bankInstitution} onChange={(e) => setBankInstitution(e.target.value)}>
-            {(bankInstitutions.length ? bankInstitutions : [
-              { key: 'BB', name: 'Banco do Brasil' },
-              { key: 'ITAU', name: 'Itaú' },
-              { key: 'CEF', name: 'Caixa (CEF)' },
-              { key: 'SANTANDER', name: 'Santander' },
-              { key: 'NUBANK', name: 'Nubank' },
-              { key: 'BRADESCO', name: 'Bradesco' }
-            ]).map((institution) => (
-              <option key={institution.key} value={institution.key}>{institution.name}</option>
-            ))}
-          </select>
-          <button type="button" onClick={handleConnectBank} disabled={connectingBank}>
-            {connectingBank ? 'Conectando...' : 'Conectar Banco'}
-          </button>
+  function renderConnections() {
+    return `
+      <div class="stack-sm">
+        <div class="inline-form">
+          <select name="bankInstitution">${renderOptions(state.bankInstitutions, state.bankInstitution, (item) => item.name)}</select>
+          <button data-action="connect-bank">Conectar banco</button>
         </div>
+        ${(state.bankConnections || []).length ? `
+          <ul class="simple-list">
+            ${state.bankConnections.map((connection) => `
+              <li>
+                <strong>${esc(connection.institution)}</strong> · ${esc(connection.status)}
+                <div class="inline-actions">
+                  <button class="ghost-button" data-action="sync-bank" data-id="${esc(connection.id)}">Sincronizar</button>
+                  <button class="ghost-button" data-action="revoke-bank" data-id="${esc(connection.id)}">Revogar</button>
+                </div>
+              </li>
+            `).join('')}
+          </ul>
+        ` : '<p class="empty-state">Nenhuma conexão bancária cadastrada.</p>'}
+      </div>
+    `;
+  }
 
-        <div className="table-wrap">
+  function renderImportPreview() {
+    if (!state.importPreview) {
+      return '<p class="empty-state">Carregue um CSV/JSON para visualizar antes de importar.</p>';
+    }
+
+    return `
+      <div class="stack-sm">
+        <p><strong>Arquivo:</strong> ${esc(state.importPreview.fileName)} · <strong>Linhas:</strong> ${esc(state.importPreview.summary?.totalRows || 0)} · <strong>Duplicadas:</strong> ${esc(state.importPreview.summary?.duplicates || 0)}</p>
+        <div class="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Instituição</th>
-                <th>Status</th>
-                <th>Escopos</th>
-                <th>Ações</th>
+                <th>Data</th>
+                <th>Descrição</th>
+                <th>Categoria</th>
+                <th>Valor</th>
+                <th>Tipo</th>
               </tr>
             </thead>
             <tbody>
-              {bankConnections.map((conn) => (
-                <tr key={conn.id}>
-                  <td>{conn.institution}</td>
-                  <td>{String(conn.status || "-").toUpperCase()}</td>
-                  <td>{conn.consent?.scopes?.join(', ') || '-'}</td>
-                  <td>
-                    <div className="table-actions">
-                      <button type="button" className="ghost" onClick={() => handleSyncConnection(conn.id)}>Sincronizar</button>
-                      <button type="button" className="ghost danger" onClick={() => handleRevokeConnection(conn.id)}>Revogar</button>
-                    </div>
-                  </td>
+              ${(state.importPreview.rows || []).slice(0, 10).map((row) => `
+                <tr>
+                  <td>${esc(row.date)}</td>
+                  <td>${esc(row.description)}</td>
+                  <td>${esc(row.category)}</td>
+                  <td>${currency.format(row.amount || 0)}</td>
+                  <td>${esc(typeLabel(row.type))}</td>
                 </tr>
-              ))}
-              {!bankConnections.length ? (
-                <tr><td colSpan="4">Sem conexões bancárias.</td></tr>
-              ) : null}
+              `).join('')}
             </tbody>
           </table>
         </div>
-      </section>
+      </div>
+    `;
+  }
 
+  function renderImportHistory() {
+    if (!state.importHistory.length) {
+      return '<p class="empty-state">Nenhuma importação registrada.</p>';
+    }
 
-      <section className="cards">
-        <article className="card"><p>Receita total</p><strong>{currency.format(dashboard?.income || 0)}</strong></article>
-        <article className="card expense"><p>Despesas</p><strong>{currency.format(dashboard?.expenses || 0)}</strong></article>
-        <article className="card investment"><p>Investimento espelhado</p><strong>{currency.format(dashboard?.investments || 0)}</strong></article>
-        <article className="card"><p>Total investido (aba)</p><strong>{currency.format(investments.total || 0)}</strong></article>
-      </section>
+    return `
+      <ul class="simple-list">
+        ${state.importHistory.map((item) => `
+          <li>
+            <strong>${esc(item.fileName)}</strong> · ${esc(memberLabel(item.memberId))} · ${esc(item.importedRows)} importados / ${esc(item.duplicateRows)} duplicados
+            <br />
+            <span class="muted">Meses: ${esc((item.importedMonths || []).join(', ') || '-')} · ${esc(new Date(item.createdAt).toLocaleString('pt-BR'))}</span>
+          </li>
+        `).join('')}
+      </ul>
+    `;
+  }
 
-      <section className="member-income-grid">
-        {dashboard?.byMember?.map((member) => (
-          <article className="card" key={member.memberId}>
-            <p>{memberLabel(member.memberId)}</p>
-            <strong>{currency.format(member.income)}</strong>
-            <small>Despesas: {currency.format(member.expenses)}</small>
-          </article>
-        ))}
-      </section>
+  function renderRecoveryPlan() {
+    const plan = state.recoveryPlan;
+    if (!plan) {
+      return '<p class="empty-state">Plano de recuperação indisponível.</p>';
+    }
 
-      <section className="content-grid">
-        <article className="panel">
-          <h2>Importação manual de arquivos</h2>
-          <p className="panel-help">Importe CSV ou JSON baixado do banco/corretora e vincule ao membro correto sem depender de Open Finance nesta etapa.</p>
-          <div className="form-grid">
-            <label>Membro do lançamento
-              <select value={importForm.memberId} onChange={(e) => setImportForm((old) => ({ ...old, memberId: e.target.value }))}>
-                {members.map((member) => <option key={member.id} value={member.id}>{memberLabel(member.id)}</option>)}
-              </select>
-            </label>
-            <label>Tipo de dado
-              <select value={importForm.importType} onChange={(e) => setImportForm((old) => ({ ...old, importType: e.target.value }))}>
-                <option value="transaction">Transações / movimentações</option>
-                <option value="income">Receitas</option>
-                <option value="expense">Despesas</option>
-                <option value="investment">Investimentos</option>
-              </select>
-            </label>
-            <label>Arquivo (CSV ou JSON)
-              <input type="file" accept=".csv,.json,.ofx,application/json,text/csv" onChange={handleImportFileSelection} />
-            </label>
-            <label>Ou cole o conteúdo
-              <textarea rows="5" value={importForm.content} onChange={(e) => { setImportForm((old) => ({ ...old, content: e.target.value })); setImportPreview(null); }} />
-            </label>
-          </div>
-          <div className="import-progress">
-            {Object.entries(importProgress).map(([key, step]) => (
-              <div key={key} className={`import-progress-item ${step.status}`}>
-                <strong>{step.label}</strong>
-                <span>{step.detail || (step.status === 'idle' ? 'Aguardando' : step.status === 'loading' ? 'Em andamento' : step.status === 'done' ? 'Concluído' : 'Erro')}</span>
-              </div>
-            ))}
-          </div>
+    const shortActions = plan.horizons?.short || [];
 
-          <div className="form-actions">
-            <button type="button" onClick={handlePreviewImport} disabled={importingFile || !importForm.content}>
-              {importingFile ? 'Processando...' : 'Pré-visualizar importação'}
-            </button>
-            <button type="button" className="ghost" onClick={handleConfirmImport} disabled={importingFile || !importPreview?.rows?.length}>
-              Confirmar importação
-            </button>
-          </div>
-
-          {importPreview ? (
-            <div className="table-wrap import-preview">
-              <p className="panel-help">
-                {importPreview.summary.totalRows} linhas lidas, {importPreview.summary.duplicates} possíveis duplicidades.
-              </p>
-              <table>
-                <thead>
-                  <tr><th>Data</th><th>Tipo</th><th>Categoria</th><th>Descrição</th><th>Valor</th></tr>
-                </thead>
-                <tbody>
-                  {importPreview.rows.slice(0, 8).map((row) => (
-                    <tr key={row.fingerprint}>
-                      <td>{row.date}</td>
-                      <td>{typeLabel(row.type)}</td>
-                      <td>{row.category}</td>
-                      <td>{row.description}</td>
-                      <td>{currency.format(row.amount)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : null}
-
-          <div className="import-history">
-            <h3>Últimas importações</h3>
-            {importHistory.length ? (
-              <ul>
-                {importHistory.slice(0, 5).map((item) => (
-                  <li key={item.id}>
-                    <strong>{item.fileName}</strong> — mês(es): {item.importedMonths?.join(', ') || '-'}, {item.importedRows} importado(s), {item.duplicateRows} duplicado(s), membro {memberLabel(item.memberId)}.
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="panel-help">Nenhuma importação registrada ainda.</p>
-            )}
-          </div>
-        </article>
-
-        <article className="panel">
-          <h2>Cadastro de lançamentos</h2>
-          <form onSubmit={submitTransaction} className="form-grid">
-            <label>Membro
-              <select value={form.memberId} onChange={(e) => setForm((old) => ({ ...old, memberId: e.target.value }))}>
-                {members.map((member) => <option key={member.id} value={member.id}>{memberLabel(member.id)}</option>)}
-              </select>
-            </label>
-            <label>Tipo
-              <select value={form.type} onChange={async (e) => {
-                const nextType = e.target.value;
-                const nextCategory = nextType === 'income'
-                  ? incomeCategories[0]
-                  : nextType === 'investment'
-                    ? investmentCategories[0]
-                    : expenseCategories[0];
-                setForm((old) => ({ ...old, type: nextType, category: nextCategory }));
-                await loadDescriptionTemplates(nextType, nextCategory);
-              }}>
-                <option value="expense">Despesa</option>
-                <option value="investment">Investimento</option>
-                <option value="income">Receita</option>
-              </select>
-            </label>
-            <label>Categoria
-              <select value={form.category} onChange={async (e) => {
-                const nextCategory = e.target.value;
-                setForm((old) => ({ ...old, category: nextCategory }));
-                await loadDescriptionTemplates(form.type, nextCategory);
-              }}>
-                {currentCategories.map((category) => <option key={category} value={category}>{category}</option>)}
-              </select>
-            </label>
-            <label>Descrição
-              <input list="desc-templates" value={form.description} onChange={(e) => setForm((old) => ({ ...old, description: e.target.value }))} />
-              <datalist id="desc-templates">{descriptionTemplates.map((item) => <option key={item} value={item} />)}</datalist>
-            </label>
-            <label>Valor
-              <input type="number" min="0" step="0.01" value={form.amount} onChange={(e) => setForm((old) => ({ ...old, amount: e.target.value }))} />
-            </label>
-            <label>Mês
-              <input type="month" value={form.month} onChange={(e) => setForm((old) => ({ ...old, month: e.target.value }))} />
-            </label>
-            <label>Data
-              <input type="date" value={form.date} onChange={(e) => setForm((old) => ({ ...old, date: e.target.value }))} />
-            </label>
-            <label>Vencimento (prazo)
-              <input type="date" value={form.dueDate} onChange={(e) => setForm((old) => ({ ...old, dueDate: e.target.value }))} />
-            </label>
-            {form.type === 'expense' ? (
-              <label className="checkbox">
-                <input type="checkbox" checked={form.isInvestmentReserve} onChange={(e) => setForm((old) => ({ ...old, isInvestmentReserve: e.target.checked }))} />
-                Reserva para investir
-              </label>
-            ) : null}
-            <div className="import-progress">
-            {Object.entries(importProgress).map(([key, step]) => (
-              <div key={key} className={`import-progress-item ${step.status}`}>
-                <strong>{step.label}</strong>
-                <span>{step.detail || (step.status === 'idle' ? 'Aguardando' : step.status === 'loading' ? 'Em andamento' : step.status === 'done' ? 'Concluído' : 'Erro')}</span>
-              </div>
-            ))}
-          </div>
-
-          <div className="form-actions">
-              <button disabled={saving} type="submit">{saving ? 'Salvando...' : 'Salvar'}</button>
-              <button type="button" className="ghost" onClick={handleRestoreDemoData}>Trazer dados de teste</button>
-              <button type="button" className="ghost danger" disabled={clearing} onClick={handleClearDemoData}>
-                {clearing ? 'Limpando...' : 'Limpar dados de teste'}
-              </button>
-            </div>
-          </form>
-        </article>
-
-        <article className="panel">
-          <h2>Quadro de categorias + gráfico por categoria</h2>
-          <p className="panel-help">Clique em uma categoria para ver o gráfico ao lado (despesas, receitas e investimentos).</p>
-          <div className="category-insights">
-            <ul className="category-list clickable">
-              {[
-                { type: 'expense', title: 'Despesas', rows: categoriesByType.expense },
-                { type: 'income', title: 'Receitas', rows: categoriesByType.income },
-                { type: 'investment', title: 'Investimentos', rows: categoriesByType.investment }
-              ].map((group) => (
-                <li key={group.type}>
-                  <p className="group-title">{group.title}</p>
-                  <ul className="category-list clickable nested">
-                    {group.rows.map((item) => (
-                      <li key={item.key}>
-                        <button
-                          type="button"
-                          className={selectedCategoryKey === item.key ? 'category-btn active' : 'category-btn'}
-                          onClick={() => setSelectedCategoryKey(item.key)}
-                        >
-                          <span>{item.category}</span>
-                          <strong>{currency.format(item.total)} ({item.percentage}%)</strong>
-                        </button>
-                      </li>
-                    ))}
-                    {!group.rows.length ? <li className="empty-row">Sem lançamentos.</li> : null}
-                  </ul>
-                </li>
-              ))}
-            </ul>
-
-            <div className="selected-category-chart">
-              <div className="pie" style={pieStyle} />
-              {selectedCategoryData ? (
-                <p>
-                  <strong>{selectedCategoryData.category}</strong> representa {selectedCategoryData.percentage}% dentro de{' '}
-                  <strong>{selectedCategoryData.type === 'expense' ? 'despesas' : selectedCategoryData.type === 'income' ? 'receitas' : 'investimentos'}</strong> no período.
-                </p>
-              ) : (
-                <p>Sem dados para o período selecionado.</p>
-              )}
-            </div>
-          </div>
-        </article>
-      </section>
-
-      <section className="content-grid">
-        <article className="panel">
-          <h2>Totais por prazo</h2>
-          <ul className="category-list">
-            {dashboard?.termTotals?.map((item) => (
-              <li key={item.term}>{termLabel(item.term)}: {currency.format(item.total)}</li>
-            ))}
+    return `
+      <div class="stack-sm">
+        <p><strong>Severidade:</strong> ${esc(plan.severityLabel || '-')}</p>
+        <p>${esc(plan.summary || '')}</p>
+        <p><strong>Reserva:</strong> ${esc(String(plan.metrics?.reservaMeses ?? 0))} meses</p>
+        <p><strong>Saldo projetado:</strong> ${currency.format(plan.metrics?.saldoCaixaProjetado || 0)}</p>
+        ${shortActions.length ? `
+          <ul class="simple-list">
+            ${shortActions.map((action) => `<li><strong>${esc(action.title)}</strong> — ${esc(action.description)}</li>`).join('')}
           </ul>
-          <h3>Sugestões</h3>
-          <ul className="suggestions">{suggestions.map((text) => <li key={text}>{text}</li>)}</ul>
-        </article>
+        ` : ''}
+      </div>
+    `;
+  }
 
+  function render() {
+    const monthOptions = state.months.length ? state.months : [state.selectedMonth];
+    const categoryOptions = currentCategoryOptions();
 
-        <article className="panel recovery-module">
-          <h2>Plano de recuperação financeira</h2>
-          <p className="panel-help">Ferramenta de apoio com orientações práticas por prazo para estabilizar e evoluir sua vida financeira.</p>
-
-          {recoveryPlan ? (
-            <>
-              <p className={`severity-badge ${recoverySeverityClass(recoveryPlan.severity)}`}>
-                Nível atual: <strong>{recoveryPlan.severityLabel}</strong> (score {recoveryPlan.score})
-              </p>
-              <p>{recoveryPlan.summary}</p>
-
-              <div className="recovery-metrics">
-                <div><span>Saldo de caixa projetado</span><strong>{currency.format(recoveryPlan.metrics.saldoCaixaProjetado || 0)}</strong></div>
-                <div><span>Comprometimento com dívida</span><strong>{((recoveryPlan.metrics.comprometimentoRendaDivida || 0) * 100).toFixed(0)}%</strong></div>
-                <div><span>Reserva estimada</span><strong>{(recoveryPlan.metrics.reservaMeses || 0).toFixed(1)} meses</strong></div>
-              </div>
-
-              <h3>Ações por prazo</h3>
-              <div className="recovery-horizons">
-                <div>
-                  <h4>Curto prazo (0-3 meses)</h4>
-                  <ul className="suggestions">
-                    {recoveryPlan.horizons.short.map((action) => <li key={action.id}>{action.title}</li>)}
-                  </ul>
-                </div>
-                <div>
-                  <h4>Médio prazo (3-12 meses)</h4>
-                  <ul className="suggestions">
-                    {recoveryPlan.horizons.medium.map((action) => <li key={action.id}>{action.title}</li>)}
-                  </ul>
-                </div>
-                <div>
-                  <h4>Longo prazo (12+ meses)</h4>
-                  <ul className="suggestions">
-                    {recoveryPlan.horizons.long.map((action) => <li key={action.id}>{action.title}</li>)}
-                  </ul>
-                </div>
-              </div>
-            </>
-          ) : (
-            <p>Carregando plano de recuperação...</p>
-          )}
-        </article>
-
-        <article className="panel">
-          <h2>Lançamentos</h2>
-          <div className="table-wrap">
-            <table>
-              <thead><tr><th>Data</th><th>Membro</th><th>Tipo</th><th>Categoria</th><th>Prazo</th><th>Valor</th></tr></thead>
-              <tbody>
-                {transactions.map((item) => (
-                  <tr key={item.id}>
-                    <td>{item.date}</td>
-                    <td>{memberLabel(item.memberId)}</td>
-                    <td>{typeLabel(item.type)}</td>
-                    <td>{item.category}</td>
-                    <td>{termLabel(item.term)}</td>
-                    <td>{currency.format(item.amount)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+    root.innerHTML = `
+      <div class="app-shell">
+        <header class="hero card">
+          <div>
+            <p class="eyebrow">App Finanças</p>
+            <h1>Painel financeiro familiar</h1>
+            <p class="muted">Frontend estático compatível com Docker, consumindo a API local sem depender de React/Vite no runtime.</p>
           </div>
-        </article>
-      </section>
-    </main>
-  );
-}
+          <div class="hero-actions">
+            <button data-action="seed-data" ${state.busy ? 'disabled' : ''}>Restaurar dados de exemplo</button>
+            <button class="ghost-button" data-action="clear-data" ${state.busy ? 'disabled' : ''}>Limpar lançamentos</button>
+          </div>
+        </header>
 
-export default App;
+        ${state.error ? `<div class="banner error">${esc(state.error)}</div>` : ''}
+        ${state.success ? `<div class="banner success">${esc(state.success)}</div>` : ''}
+
+        <section class="card filters">
+          <div>
+            <label>Membro</label>
+            <select name="selectedMember">${renderOptions([{ id: 'all', name: 'Todos' }, ...state.members], state.selectedMember, (item) => item.name || item.id)}</select>
+          </div>
+          <div>
+            <label>Mês</label>
+            <select name="selectedMonth">${renderOptions(monthOptions, state.selectedMonth)}</select>
+          </div>
+          <div class="filter-action">
+            <button data-action="refresh" ${state.busy ? 'disabled' : ''}>${state.loading ? 'Carregando...' : 'Atualizar painel'}</button>
+          </div>
+        </section>
+
+        ${renderSummaryCards()}
+
+        <section class="card-grid details-grid">
+          <article class="card">
+            <h2>Novo lançamento</h2>
+            <div class="form-grid">
+              <label><span>Membro</span><select name="tx-memberId">${renderOptions(state.members, state.transactionForm.memberId, (item) => item.name)}</select></label>
+              <label><span>Tipo</span><select name="tx-type">${renderOptions(['expense', 'income', 'investment'], state.transactionForm.type, typeLabel)}</select></label>
+              <label><span>Categoria</span><select name="tx-category">${renderOptions(categoryOptions, state.transactionForm.category)}</select></label>
+              <label><span>Descrição</span><input name="tx-description" value="${esc(state.transactionForm.description)}" /></label>
+              <label><span>Valor</span><input name="tx-amount" type="number" min="0" step="0.01" value="${esc(state.transactionForm.amount)}" /></label>
+              <label><span>Mês</span><input name="tx-month" type="month" value="${esc(state.transactionForm.month)}" /></label>
+              <label><span>Data</span><input name="tx-date" type="date" value="${esc(state.transactionForm.date)}" /></label>
+              <label><span>Vencimento</span><input name="tx-dueDate" type="date" value="${esc(state.transactionForm.dueDate)}" /></label>
+            </div>
+            <label class="checkbox-row"><input name="tx-isInvestmentReserve" type="checkbox" ${state.transactionForm.isInvestmentReserve ? 'checked' : ''} /> Reserva para investir</label>
+            <button data-action="save-transaction" ${state.busy ? 'disabled' : ''}>Salvar lançamento</button>
+          </article>
+
+          <article class="card">
+            <h2>Plano de recuperação</h2>
+            ${renderRecoveryPlan()}
+          </article>
+        </section>
+
+        <section class="card">
+          <h2>Lançamentos</h2>
+          ${renderTransactions()}
+        </section>
+
+        <section class="card-grid details-grid">
+          <article class="card">
+            <h2>Investimentos</h2>
+            ${renderInvestments()}
+          </article>
+          <article class="card">
+            <h2>Open Finance</h2>
+            ${renderConnections()}
+          </article>
+        </section>
+
+        <section class="card-grid details-grid">
+          <article class="card">
+            <h2>Importação manual</h2>
+            <div class="form-grid">
+              <label><span>Membro</span><select name="import-memberId">${renderOptions(state.members, state.importForm.memberId, (item) => item.name)}</select></label>
+              <label><span>Tipo</span><select name="import-importType">${renderOptions(['transaction'], state.importForm.importType)}</select></label>
+              <label><span>Mês fallback</span><input name="import-month" type="month" value="${esc(state.importForm.month)}" /></label>
+              <label class="full-width"><span>Arquivo</span><input name="import-file" type="file" accept=".csv,.json,.txt" /></label>
+              <label class="full-width"><span>Conteúdo</span><textarea name="import-content" rows="8">${esc(state.importForm.content)}</textarea></label>
+            </div>
+            <div class="inline-actions">
+              <button data-action="preview-import" ${state.busy ? 'disabled' : ''}>Pré-visualizar</button>
+              <button class="ghost-button" data-action="commit-import" ${state.busy ? 'disabled' : ''}>Importar</button>
+            </div>
+            ${renderImportPreview()}
+          </article>
+          <article class="card">
+            <h2>Histórico de importações</h2>
+            ${renderImportHistory()}
+          </article>
+        </section>
+      </div>
+    `;
+
+    bindEvents();
+  }
+
+  async function handleAction(action, element) {
+    if (state.busy && action !== 'refresh') return;
+
+    if (action === 'refresh') {
+      await refreshData();
+      return;
+    }
+
+    if (action === 'seed-data') {
+      await runBusy(() => request('/api/transactions/seed', { method: 'POST', body: '{}' }), 'Dados de exemplo restaurados.');
+      return;
+    }
+
+    if (action === 'clear-data') {
+      await runBusy(() => request('/api/transactions', { method: 'DELETE' }), 'Todos os lançamentos foram removidos.');
+      state.importPreview = null;
+      return;
+    }
+
+    if (action === 'save-transaction') {
+      await runBusy(() => request('/api/transactions', { method: 'POST', body: JSON.stringify(transactionPayload()) }), 'Lançamento salvo com sucesso.');
+      state.transactionForm = { ...defaultTransactionForm, memberId: state.transactionForm.memberId, category: currentCategoryOptions()[0] || '', month: state.selectedMonth };
+      return;
+    }
+
+    if (action === 'delete-transaction') {
+      await runBusy(() => request(`/api/transactions/${element.dataset.id}`, { method: 'DELETE' }), 'Lançamento removido com sucesso.');
+      return;
+    }
+
+    if (action === 'connect-bank') {
+      const payload = { institution_key: state.bankInstitution, member: state.transactionForm.memberId };
+      const data = await runBusy(() => request('/api/banks/connect', { method: 'POST', body: JSON.stringify(payload) }), 'Conexão bancária iniciada.');
+      if (data.redirectUrl) {
+        setMessage('success', `Conexão iniciada. Abra manualmente a URL de callback/mock se necessário: ${data.redirectUrl}`);
+      }
+      return;
+    }
+
+    if (action === 'sync-bank') {
+      await runBusy(() => request(`/api/banks/${element.dataset.id}/sync`, { method: 'POST', body: '{}' }), 'Sincronização concluída.');
+      return;
+    }
+
+    if (action === 'revoke-bank') {
+      await runBusy(() => request(`/api/banks/${element.dataset.id}/revoke`, { method: 'POST', body: '{}' }), 'Consentimento revogado.');
+      return;
+    }
+
+    if (action === 'preview-import') {
+      state.importPreview = await runBusy(() => request('/api/imports/preview', { method: 'POST', body: JSON.stringify(state.importForm) }));
+      state.success = 'Pré-visualização gerada com sucesso.';
+      render();
+      return;
+    }
+
+    if (action === 'commit-import') {
+      const data = await runBusy(() => request('/api/imports/commit', { method: 'POST', body: JSON.stringify(state.importForm) }));
+      state.importPreview = null;
+      setMessage('success', data.message || 'Importação concluída com sucesso.');
+    }
+  }
+
+  function bindEvents() {
+    root.querySelectorAll('[data-action]').forEach((button) => {
+      button.addEventListener('click', () => {
+        handleAction(button.dataset.action, button).catch(() => {});
+      });
+    });
+
+    const selectedMember = root.querySelector('select[name="selectedMember"]');
+    if (selectedMember) {
+      selectedMember.addEventListener('change', async (event) => {
+        state.selectedMember = event.target.value;
+        await refreshData();
+      });
+    }
+
+    const selectedMonth = root.querySelector('select[name="selectedMonth"]');
+    if (selectedMonth) {
+      selectedMonth.addEventListener('change', async (event) => {
+        state.selectedMonth = event.target.value;
+        state.transactionForm.month = event.target.value;
+        state.importForm.month = event.target.value;
+        await refreshData();
+      });
+    }
+
+    root.querySelectorAll('[name^="tx-"]').forEach((input) => {
+      input.addEventListener('change', (event) => {
+        const field = event.target.name.replace('tx-', '');
+        state.transactionForm[field] = event.target.type === 'checkbox' ? event.target.checked : event.target.value;
+        if (field === 'type') {
+          state.transactionForm.category = currentCategoryOptions()[0] || '';
+          render();
+        }
+      });
+    });
+
+    root.querySelectorAll('[name^="import-"]').forEach((input) => {
+      input.addEventListener('change', (event) => {
+        const field = event.target.name.replace('import-', '');
+        state.importForm[field] = event.target.value;
+      });
+    });
+
+    const bankInstitution = root.querySelector('select[name="bankInstitution"]');
+    if (bankInstitution) {
+      bankInstitution.addEventListener('change', (event) => {
+        state.bankInstitution = event.target.value;
+      });
+    }
+
+    const fileInput = root.querySelector('input[name="import-file"]');
+    if (fileInput) {
+      fileInput.addEventListener('change', async (event) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+        state.importForm.fileName = file.name;
+        state.importForm.content = await file.text();
+        render();
+      });
+    }
+  }
+
+  render();
+  boot();
+}

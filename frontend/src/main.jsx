@@ -1,10 +1,8 @@
-import React from 'react';
-import ReactDOM from 'react-dom/client';
-import App from './App.jsx';
-import './styles.css';
+import { createApp } from './App.jsx';
 
-ReactDOM.createRoot(document.getElementById('root')).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>
-);
+const apiUrl = window.__APP_CONFIG__?.apiUrl || `${window.location.protocol}//${window.location.hostname}:3333`;
+
+createApp({
+  root: document.getElementById('root'),
+  apiUrl
+});
