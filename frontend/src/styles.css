@@ -129,3 +129,40 @@ th { font-size: .82rem; text-transform: uppercase; letter-spacing: .05em; color:
   padding: 10px 12px;
   font-weight: 600;
 }
+
+.analysis-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.mini-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.mini-stat-card {
+  border: 1px solid #dbe5f4;
+  border-radius: 16px;
+  padding: 14px;
+  background: #f8fbff;
+  display: grid;
+  gap: 6px;
+}
+
+.rule-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.rule-chip {
+  display: inline-flex;
+  padding: 8px 10px;
+  border-radius: 999px;
+  background: #eef4ff;
+  color: #1e40af;
+  font-size: 12px;
+  font-weight: 700;
+}

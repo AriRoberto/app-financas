@@ -2,9 +2,10 @@ import { buildImportFingerprint, parseImportContent } from '../imports/parser.js
 import { resolveImporter } from '../importers/registry.js';
 import { normalizeImportedRow } from '../normalizers/transaction-normalizer.js';
 
-export function previewBankImportRows({ fileName, content, importType, memberId, fallbackMonth, bankKeyHint, accountIdHint, accountLabelHint, referencePeriod }) {
-  const { format, rows } = parseImportContent({ fileName, content });
-  const importer = resolveImporter({ fileName, rows, bankKeyHint });
+export function previewBankImportRows({ fileName, content, importType, memberId, fallbackMonth, bankKeyHint, accountIdHint, accountLabelHint, referencePeriod, categoriesByType }) {
+  const parsed = parseImportContent({ fileName, content });
+  const { format, rows } = parsed;
+  const importer = resolveImporter({ fileName, rows, bankKeyHint, format, parserLayout: parsed.layout });
 
   const previewRows = rows.flatMap((row, index) => {
     try {
@@ -17,7 +18,8 @@ export function previewBankImportRows({ fileName, content, importType, memberId,
         accountIdHint,
         accountLabelHint,
         fileName,
-        referencePeriod
+        referencePeriod,
+        categoriesByType
       });
 
       if (!normalized) return [];
@@ -35,7 +37,8 @@ export function previewBankImportRows({ fileName, content, importType, memberId,
           category: normalized.category,
           description: normalized.description,
           amount: normalized.amount,
-          date: normalized.date
+          date: normalized.date,
+          sourceFileName: fileName
         })
       }];
     } catch (error) {
@@ -46,6 +49,8 @@ export function previewBankImportRows({ fileName, content, importType, memberId,
 
   return {
     format,
+    parserLayout: parsed.layout || `${importer.key.toLowerCase()}-${format}`,
+    extractedTextPreview: parsed.text ? parsed.text.split(/\n+/).slice(0, 8) : [],
     importer: { key: importer.key, label: importer.label },
     rows: previewRows
   };

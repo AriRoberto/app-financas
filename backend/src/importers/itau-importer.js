@@ -7,10 +7,12 @@ function includesAny(text, values) {
 export const itauImporter = buildImporter({
   key: 'ITAU',
   label: 'Itaú',
-  supports({ fileName, rows }) {
+  supports({ fileName, rows, format, parserLayout }) {
     const safeName = String(fileName || '').toLowerCase();
     const sample = JSON.stringify(rows[0] || {}).toLowerCase();
     return includesAny(safeName, ['itau', 'itaú'])
+      || format === 'pdf'
+      || String(parserLayout || '').includes('itau')
       || includesAny(sample, ['agencia', 'agência', 'conta_corrente', 'saldo_em_conta', 'lancamento_futuro', 'descricao_lancamento']);
   },
   extractAccountInfo({ row, accountIdHint, accountLabelHint }) {

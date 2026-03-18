@@ -64,6 +64,16 @@ async function parseJson(response) {
 }
 
 async function readImportFile(file) {
+  if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+    const buffer = await file.arrayBuffer();
+    let binary = '';
+    const bytes = new Uint8Array(buffer);
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+    }
+    return `data:application/pdf;base64,${btoa(binary)}`;
+  }
   const buffer = await file.arrayBuffer();
   try {
     return new TextDecoder('utf-8', { fatal: true }).decode(buffer);
@@ -116,7 +126,10 @@ export function createApp({ root, apiUrl }) {
     months: [],
     banks: [],
     accounts: [],
+    files: [],
+    categorizationRules: [],
     dashboard: null,
+    consolidatedAnalysis: null,
     transactions: [],
     investments: { total: 0, investments: [] },
     recoveryPlan: null,
@@ -131,6 +144,7 @@ export function createApp({ root, apiUrl }) {
       member: 'all',
       bank: 'all',
       accountId: 'all',
+      fileName: 'all',
       month: new Date().toISOString().slice(0, 7),
       from: '',
       to: '',
@@ -174,6 +188,7 @@ export function createApp({ root, apiUrl }) {
       member: state.filters.member,
       bank: state.filters.bank,
       accountId: state.filters.accountId,
+      fileName: state.filters.fileName,
       type: state.filters.type,
       category: state.selectedChartCategory || state.filters.category,
       search: state.filters.search
@@ -192,12 +207,13 @@ export function createApp({ root, apiUrl }) {
   }
 
   async function loadStaticData() {
-    const [membersData, categoriesData, monthsData, banksData, accountsData] = await Promise.all([
+    const [membersData, categoriesData, monthsData, banksData, accountsData, filesData] = await Promise.all([
       request('/api/members'),
       request('/api/categories'),
       request('/api/months?member=all'),
       request('/api/banks'),
-      request('/api/accounts')
+      request('/api/accounts'),
+      request('/api/files')
     ]);
 
     state.members = membersData.members || [];
@@ -205,8 +221,10 @@ export function createApp({ root, apiUrl }) {
     state.incomeCategories = categoriesData.incomeCategories || [];
     state.investmentCategories = categoriesData.investmentCategories || [];
     state.months = monthsData.months || [];
+    state.categorizationRules = categoriesData.categorizationRules || [];
     state.banks = [{ key: 'all', name: 'Todos os bancos' }, ...(banksData.banks || [])];
     state.accounts = [{ id: 'all', label: 'Todas as contas' }, ...(accountsData.accounts || [])];
+    state.files = [{ id: 'all', label: 'Todos os arquivos' }, ...(filesData.files || [])];
 
     const firstMember = state.members[0]?.id || 'husband';
     const firstMonth = state.months[state.months.length - 1] || state.filters.month;
@@ -222,12 +240,14 @@ export function createApp({ root, apiUrl }) {
 
   async function loadDashboardData() {
     const query = buildDashboardParams();
-    const [dashboard, transactions, investments, recoveryPlan, importHistory] = await Promise.all([
+    const [dashboard, transactions, investments, recoveryPlan, importHistory, consolidatedAnalysis, filesData] = await Promise.all([
       request(`/api/dashboard?${query}`),
       request(`/api/transactions?${query}`),
       request(`/api/investments?${query}`),
       request(`/api/recovery/plan?${query}`),
-      request('/api/imports/history')
+      request('/api/imports/history'),
+      request(`/api/analysis/consolidated?${query}`),
+      request('/api/files')
     ]);
 
     state.dashboard = dashboard;
@@ -235,11 +255,13 @@ export function createApp({ root, apiUrl }) {
     state.investments = investments;
     state.recoveryPlan = recoveryPlan;
     state.importHistory = importHistory.imports || [];
+    state.consolidatedAnalysis = consolidatedAnalysis;
 
     const dynamicBanks = [{ key: 'all', name: 'Todos os bancos' }, ...((dashboard.byBank || []).map((item) => ({ key: item.id, name: item.label })))];
     const dynamicAccounts = [{ id: 'all', label: 'Todas as contas' }, ...((dashboard.byAccount || []).map((item) => ({ id: item.id, label: item.label })))];
     state.banks = dynamicBanks;
     state.accounts = dynamicAccounts;
+    state.files = [{ id: 'all', label: 'Todos os arquivos' }, ...(filesData.files || [])];
   }
 
   async function boot() {
@@ -317,6 +339,7 @@ export function createApp({ root, apiUrl }) {
           <label><span>Membro</span><select name="filter-member">${renderSelectOptions([{ id: 'all', name: 'Todos os membros' }, ...state.members], state.filters.member, 'id', 'name')}</select></label>
           <label><span>Banco</span><select name="filter-bank">${renderSelectOptions(state.banks, state.filters.bank, 'key', 'name')}</select></label>
           <label><span>Conta</span><select name="filter-accountId">${renderSelectOptions(state.accounts, state.filters.accountId, 'id', 'label')}</select></label>
+          <label><span>Arquivo</span><select name="filter-fileName">${renderSelectOptions(state.files, state.filters.fileName, 'id', 'label')}</select></label>
           <label><span>Mês</span><select name="filter-month"><option value="">Período livre</option>${state.months.map((month) => `<option value="${month}" ${month === state.filters.month ? 'selected' : ''}>${month}</option>`).join('')}</select></label>
           <label><span>De</span><input name="filter-from" type="date" value="${esc(state.filters.from)}" /></label>
           <label><span>Até</span><input name="filter-to" type="date" value="${esc(state.filters.to)}" /></label>
@@ -419,12 +442,12 @@ export function createApp({ root, apiUrl }) {
     return `
       <div class="stack-sm">
         <div class="badge-row">
-          <span class="severity-pill">${esc(plan.severityLabel || '-')}</span>
-          <span class="muted">Reserva: ${esc(String(plan.metrics?.reservaMeses ?? 0))} meses</span>
+          <span class="severity-pill">${esc(plan.severity || '-')}</span>
+          <span class="muted">Economia potencial: ${currency.format(plan.summary?.estimatedSavingsPotential || 0)}</span>
         </div>
-        <p>${esc(plan.summary || '')}</p>
+        <p>Saldo consolidado: <strong>${currency.format(plan.summary?.balance || 0)}</strong> · Despesas: <strong>${currency.format(plan.summary?.expenses || 0)}</strong></p>
         <ul class="simple-list">
-          ${(plan.horizons?.short || []).map((action) => `<li><strong>${esc(action.title)}</strong> — ${esc(action.description)}</li>`).join('')}
+          ${(plan.recommendations?.immediate || []).map((action) => `<li><strong>${esc(action.title)}</strong> — impacto estimado ${currency.format(action.impact || 0)}</li>`).join('')}
         </ul>
       </div>
     `;
@@ -490,8 +513,9 @@ export function createApp({ root, apiUrl }) {
 
     return `
       <div class="stack-sm import-preview">
-        <p><strong>Banco detectado:</strong> ${esc(state.importPreview.bank?.label || '-')} · <strong>Linhas válidas:</strong> ${esc(state.importPreview.summary?.totalRows || 0)} · <strong>Duplicadas:</strong> ${esc(state.importPreview.summary?.duplicates || 0)}</p>
+        <p><strong>Banco detectado:</strong> ${esc(state.importPreview.bank?.label || '-')} · <strong>Formato:</strong> ${esc((state.importPreview.format || '').toUpperCase())} · <strong>Layout:</strong> ${esc(state.importPreview.parserLayout || '-')} · <strong>Linhas válidas:</strong> ${esc(state.importPreview.summary?.totalRows || 0)} · <strong>Duplicadas:</strong> ${esc(state.importPreview.summary?.duplicates || 0)} · <strong>Categorizadas:</strong> ${esc(state.importPreview.summary?.categorizedAutomatically || 0)}</p>
         ${state.importPreview.duplicateFile ? `<div class="inline-warning">${esc(state.importPreview.duplicateFileMessage)}</div>` : ''}
+        ${state.importPreview.extractedTextPreview?.length ? `<div class="boxed"><strong>Trecho extraído do PDF:</strong><br />${state.importPreview.extractedTextPreview.map((line) => esc(line)).join('<br />')}</div>` : ''}
         <div class="table-wrap">
           <table>
             <thead>
@@ -513,7 +537,7 @@ export function createApp({ root, apiUrl }) {
                   <td>${esc(row.accountLabel)}</td>
                   <td>${esc(row.description)}</td>
                   <td>${esc(typeLabel(row.type))}</td>
-                  <td>${esc(row.category)}</td>
+                  <td>${esc(row.category)}<br /><small>${esc(row.categorization?.matchedBy === 'keyword' ? `auto: ${row.categorization.rule}` : 'fallback')}</small></td>
                   <td>${currency.format(row.amount)}</td>
                 </tr>
               `).join('')}
@@ -541,6 +565,59 @@ export function createApp({ root, apiUrl }) {
           </article>
         `).join('')}
       </div>
+    `;
+  }
+
+
+  function renderConsolidatedAnalysis() {
+    const analysis = state.consolidatedAnalysis;
+    if (!analysis) return '<div class="empty-state boxed">Análise consolidada indisponível.</div>';
+
+    const memberCards = (analysis.byMember || []).map((item) => `
+      <article class="mini-stat-card">
+        <strong>${esc(memberLabel(item.id))}</strong>
+        <span>Despesas: ${currency.format(item.expenses || 0)}</span>
+        <small>Categoria dominante: ${esc(item.topCategories?.[0]?.label || '-')}</small>
+      </article>
+    `).join('');
+
+    const fileRows = (analysis.byFile || []).map((item) => `
+      <tr>
+        <td>${esc(item.label)}</td>
+        <td>${item.transactionCount}</td>
+        <td>${currency.format(item.expenses || 0)}</td>
+        <td>${esc(item.topCategories?.[0]?.label || '-')}</td>
+      </tr>
+    `).join('');
+
+    return `
+      <section class="analysis-grid">
+        <article class="card compact-card">
+          <h3>Leitura consolidada do período</h3>
+          <p><strong>Arquivos:</strong> ${esc((analysis.totals?.files || []).join(', ') || 'Somente lançamentos manuais')}</p>
+          <p><strong>Maiores categorias:</strong> ${(analysis.topCategories || []).slice(0, 3).map((item) => `${esc(item.label)} (${currency.format(item.amount)})`).join(' · ') || 'Sem dados'}</p>
+        </article>
+        <article class="card compact-card">
+          <h3>Análise por membro</h3>
+          <div class="mini-stat-grid">${memberCards || '<p class="empty-state">Sem dados por membro.</p>'}</div>
+        </article>
+        <article class="card compact-card">
+          <h3>Análise por arquivo</h3>
+          ${fileRows ? `<div class="table-wrap"><table><thead><tr><th>Arquivo</th><th>Lanç.</th><th>Despesas</th><th>Categoria dominante</th></tr></thead><tbody>${fileRows}</tbody></table></div>` : '<p class="empty-state">Nenhum arquivo importado no filtro atual.</p>'}
+        </article>
+      </section>
+    `;
+  }
+
+  function renderCategorizationPanel() {
+    return `
+      <article class="card compact-card">
+        <h3>Categorização automática</h3>
+        <p class="muted">As regras atuais vinculam descrições importadas às categorias já existentes no app.</p>
+        <div class="rule-chip-list">
+          ${(state.categorizationRules || []).slice(0, 10).map((rule) => `<span class="rule-chip">${esc(typeLabel(rule.type))}: ${esc(rule.category)}</span>`).join('')}
+        </div>
+      </article>
     `;
   }
 
@@ -580,14 +657,14 @@ export function createApp({ root, apiUrl }) {
               <p class="eyebrow">Importação multi-banco</p>
               <h2>BB e Itaú</h2>
             </div>
-            <span class="muted">Fluxo: detectar banco → normalizar → associar membro/conta → persistir → recalcular dashboards.</span>
+            <span class="muted">Fluxo: detectar CSV/PDF → extrair → normalizar → categorizar → associar membro/conta → persistir → recalcular dashboards e análises.</span>
           </div>
           <div class="form-grid">
             <label><span>Membro</span><select name="import-memberId">${renderSelectOptions(state.members, state.importForm.memberId, 'id', 'name')}</select></label>
             <label><span>Banco</span><select name="import-bankKey"><option value="AUTO" ${state.importForm.bankKey === 'AUTO' ? 'selected' : ''}>Auto-detectar</option>${state.banks.filter((item) => item.key !== 'all').map((bank) => `<option value="${esc(bank.key)}" ${state.importForm.bankKey === bank.key ? 'selected' : ''}>${esc(bank.name)}</option>`).join('')}</select></label>
             <label><span>Conta</span><input name="import-accountLabel" value="${esc(state.importForm.accountLabel)}" placeholder="Ex.: Itaú salário" /></label>
             <label><span>Período</span><input name="import-referencePeriod" type="month" value="${esc(state.importForm.referencePeriod)}" /></label>
-            <label class="span-2"><span>Arquivo CSV</span><input name="import-file" type="file" accept=".csv,.json,.txt" /></label>
+            <label class="span-2"><span>Arquivo CSV/PDF</span><input name="import-file" type="file" accept=".csv,.json,.txt,.pdf,application/pdf" /></label>
             <label class="span-2"><span>Conteúdo</span><textarea name="import-content" rows="8">${esc(state.importForm.content)}</textarea></label>
           </div>
           <div class="inline-actions">
@@ -607,7 +684,7 @@ export function createApp({ root, apiUrl }) {
           <div>
             <p class="eyebrow">Arquitetura multi-banco</p>
             <h1>Painel financeiro familiar</h1>
-            <p class="muted">Base preparada para BB + Itaú, organização por membro/conta/banco, dashboards funcionais e interface pronta para demonstração.</p>
+            <p class="muted">Base preparada para CSV + PDF, categorização automática, consolidação multi-banco/multi-arquivo e plano de recuperação orientado por análise.</p>
           </div>
           <div class="hero-side">
             <strong>${state.dashboard?.empty ? 'Sem dados nos filtros' : `${state.dashboard?.transactionCount || 0} lançamentos ativos`}</strong>
@@ -622,6 +699,7 @@ export function createApp({ root, apiUrl }) {
           ${renderFilters()}
           ${renderSummary()}
           ${renderDashboards()}
+          ${renderConsolidatedAnalysis()}
           <section class="workspace-grid secondary">
             <article class="card">
               <div class="panel-heading compact"><div><p class="eyebrow">Lançamentos</p><h2>Lista com expand/collapse</h2><small>${state.transactions.length} registro(s) no filtro atual</small></div><div class="inline-actions"><button class="ghost-button" data-action="toggle-transactions-section">${state.transactionsCollapsed ? 'Expandir lista' : 'Recolher lista'}</button></div></div>
@@ -633,6 +711,7 @@ export function createApp({ root, apiUrl }) {
               <article class="card inner-card"><h3>Plano de recuperação</h3>${renderRecoveryPlan()}</article>
             </article>
           </section>
+          <section class="workspace-grid secondary">${renderCategorizationPanel()}</section>
           ${renderForms()}
           <section class="workspace-grid secondary">
             <article class="card"><div class="panel-heading compact"><div><p class="eyebrow">Histórico</p><h2>Importações realizadas</h2></div><div class="inline-actions"><button class="ghost-button" data-action="clear-history">Limpar histórico</button><button class="ghost-button danger" data-action="clear-history-and-data">Limpar histórico e dados</button></div></div>${renderImportHistory()}</article>
@@ -785,6 +864,7 @@ export function createApp({ root, apiUrl }) {
         if (!file) return;
         state.importForm.fileName = file.name;
         state.importForm.content = await readImportFile(file);
+        state.importPreview = null;
         render();
       });
     }

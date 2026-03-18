@@ -139,16 +139,52 @@ test('retorna plano de recuperação financeira com ações por prazo', async ()
     assert.equal(response.status, 200);
     const data = await response.json();
 
-    assert.ok(typeof data.severity === 'number');
-    assert.ok(data.severityLabel);
-    assert.ok(Array.isArray(data.horizons.short));
-    assert.ok(Array.isArray(data.horizons.medium));
-    assert.ok(Array.isArray(data.horizons.long));
-    assert.ok(data.nextBestAction?.title);
+    assert.ok(typeof data.severity === 'string');
+    assert.ok(data.summary);
+    assert.ok(Array.isArray(data.recommendations.immediate));
+    assert.ok(Array.isArray(data.recommendations.shortTerm));
+    assert.ok(Array.isArray(data.recommendations.mediumTerm));
+    assert.ok(data.recommendations.immediate[0]?.title);
   });
 });
 
 
+
+
+test('retorna análise consolidada por membro e arquivo importado', async () => {
+  await withServer(async (baseUrl) => {
+    await fetch(`${baseUrl}/api/transactions/seed`, { method: 'POST' });
+    await fetch(`${baseUrl}/api/imports/commit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fileName: 'extrato-itau.pdf',
+        content: `data:application/pdf;base64,${Buffer.from(String.raw`%PDF-1.4
+1 0 obj<< /Length 129 >>stream
+BT
+72 720 Td (Agência 1234 Conta 56789-0) Tj
+0 -18 Td (18/04/2026 SUPER MERCADO 123 -230,45 1200,00) Tj
+0 -18 Td (19/04/2026 PIX SALARIO EMPRESA 4500,00 5700,00) Tj
+ET
+endstream
+endobj
+trailer<<>>
+%%EOF`, 'latin1').toString('base64')}`,
+        importType: 'transaction',
+        memberId: 'wife',
+        month: '2026-04'
+      })
+    });
+
+    const response = await fetch(`${baseUrl}/api/analysis/consolidated?member=wife&from=2026-04-01&to=2026-04-30`);
+    assert.equal(response.status, 200);
+    const data = await response.json();
+    assert.ok(Array.isArray(data.byMember));
+    assert.ok(Array.isArray(data.byFile));
+    assert.ok(data.byFile.some((item) => item.label === 'extrato-itau.pdf'));
+    assert.ok(data.topCategories.some((item) => item.label === 'Alimentação' || item.label === 'Salário'));
+  });
+});
 test('lista instituições bancárias do app para conexão', async () => {
   await withServer(async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/banks/institutions`);

@@ -1,4 +1,3 @@
-import crypto from 'node:crypto';
 import cors from 'cors';
 import express from 'express';
 import { AispClient } from './openfinance/aisp-client.js';
@@ -26,8 +25,12 @@ import { registerMockAispRoutes } from './openfinance/mock-aisp.js';
 import { startPeriodicSync, syncByConnectionId } from './openfinance/sync-service.js';
 import { getInstitutionByKey } from './openfinance/institutions.js';
 import { previewImportRows } from './imports/service.js';
-import { buildFinancialDashboard, filterFinancialTransactions, listAvailableAccounts, listAvailableBanks } from './services/aggregation-service.js';
+import { buildFinancialDashboard, filterFinancialTransactions, listAvailableAccounts, listAvailableBanks, listAvailableFiles } from './services/aggregation-service.js';
 import { createJsonFinanceRepository } from './persistence/local-store.js';
+import { explainCategorizationRules } from './services/categorization-service.js';
+import { buildImportedFileFingerprint, findImportedFile, hasImportedFingerprint } from './services/deduplication-service.js';
+import { buildConsolidatedAnalysis } from './services/analysis-service.js';
+import { buildRecoveryPlanFromAnalysis } from './services/recovery-plan-service.js';
 
 const app = express();
 const PORT = process.env.PORT || 3333;
@@ -271,6 +274,7 @@ function filterTransactions(filters = {}) {
     accountId: filters.accountId || 'all',
     type: filters.type || 'all',
     category: filters.category || 'all',
+    fileName: filters.fileName || 'all',
     term: filters.term || 'all',
     from: filters.from,
     to: filters.to,
@@ -278,17 +282,7 @@ function filterTransactions(filters = {}) {
   });
 }
 
-function calculateSummary(filteredTransactions) {
-  const income = filteredTransactions.filter((item) => item.type === 'income').reduce((sum, item) => sum + item.amount, 0);
-  const expenses = filteredTransactions.filter((item) => item.type === 'expense').reduce((sum, item) => sum + item.amount, 0);
-  const investmentsFromReserves = filteredTransactions.filter((item) => item.type === 'expense' && item.isInvestmentReserve).reduce((sum, item) => sum + item.amount, 0);
-  const directInvestments = filteredTransactions.filter((item) => item.type === 'investment').reduce((sum, item) => sum + item.amount, 0);
-  const investmentsTotal = directInvestments + investmentsFromReserves;
-  const outflow = expenses + directInvestments;
-  return { income, expenses, investmentsTotal, outflow, balance: income - outflow };
-}
-
-function buildDashboard({ month, member = 'all', bank = 'all', accountId = 'all', from, to, term = 'all', type = 'all', category = 'all', search = '' }) {
+function buildDashboard({ month, member = 'all', bank = 'all', accountId = 'all', fileName = 'all', from, to, term = 'all', type = 'all', category = 'all', search = '' }) {
   return buildFinancialDashboard({
     transactions,
     members,
@@ -302,6 +296,7 @@ function buildDashboard({ month, member = 'all', bank = 'all', accountId = 'all'
       term,
       type,
       category,
+      fileName,
       search
     }
   });
@@ -340,171 +335,13 @@ function severityLabel(severity) {
   return ['Estável', 'Atenção', 'Risco', 'Crítico'][severity] || 'Estável';
 }
 
-function buildRecoveryPlan({ month, member = 'all', from, to }) {
-  const filtered = filterTransactions({ month, member, from, to });
-  const monthlyHistory = getAvailableMonths(filtered).map((monthItem) => {
-    const rows = filtered.filter((item) => item.month === monthItem);
-    const income = rows.filter((item) => item.type === 'income').reduce((sum, item) => sum + item.amount, 0);
-    const expenses = rows.filter((item) => item.type === 'expense').reduce((sum, item) => sum + item.amount, 0);
-    return { month: monthItem, income, expenses, rows };
+function buildRecoveryPlan({ month, member = 'all', bank = 'all', accountId = 'all', fileName = 'all', from, to, type = 'all', category = 'all', search = '' }) {
+  const analysis = buildConsolidatedAnalysis({
+    transactions,
+    members,
+    filters: { month, member, bank, accountId, fileName, from, to, type, category, search }
   });
-
-  const recent = monthlyHistory.slice(-3);
-  const incomeAvg = average(recent.map((item) => item.income));
-  const incomeVolatility = incomeAvg > 0 ? stddev(recent.map((item) => item.income)) / incomeAvg : 0;
-
-  const essentialCategories = new Set(['Moradia', 'Alimentação', 'Saúde', 'Transporte', 'Educação']);
-  const essentialExpenses = recent
-    .flatMap((item) => item.rows)
-    .filter((item) => item.type === 'expense' && essentialCategories.has(item.category))
-    .reduce((sum, item) => sum + item.amount, 0) / Math.max(recent.length, 1);
-
-  const discretionaryExpenses = recent
-    .flatMap((item) => item.rows)
-    .filter((item) => item.type === 'expense' && !essentialCategories.has(item.category))
-    .reduce((sum, item) => sum + item.amount, 0) / Math.max(recent.length, 1);
-
-  const debtService = recent
-    .flatMap((item) => item.rows)
-    .filter((item) => item.type === 'expense' && (item.term === 'medium' || item.term === 'long'))
-    .reduce((sum, item) => sum + item.amount, 0) / Math.max(recent.length, 1);
-
-  const investmentReserve = investments
-    .filter((item) => isMemberMatch(item, member))
-    .reduce((sum, item) => sum + item.amount, 0);
-
-  const crd = incomeAvg > 0 ? debtService / incomeAvg : 0;
-  const scp = incomeAvg - (essentialExpenses + discretionaryExpenses + debtService);
-  const cashBufferMonths = essentialExpenses > 0 ? investmentReserve / essentialExpenses : 0;
-
-  const drivers = [];
-  let score = 0;
-  if (scp < 0) {
-    score += 2;
-    drivers.push({ code: 'PRESSAO_CAIXA', weight: 2, value: Number(scp.toFixed(2)) });
-  }
-  if (crd >= 0.45) {
-    score += 3;
-    drivers.push({ code: 'DIVIDA_ALTA', weight: 3, value: Number(crd.toFixed(2)) });
-  } else if (crd >= 0.3) {
-    score += 2;
-    drivers.push({ code: 'DIVIDA_MODERADA', weight: 2, value: Number(crd.toFixed(2)) });
-  }
-  if (cashBufferMonths < 1) {
-    score += 1;
-    drivers.push({ code: 'RESERVA_BAIXA', weight: 1, value: Number(cashBufferMonths.toFixed(2)) });
-  }
-  if (incomeVolatility >= 0.35) {
-    score += 1;
-    drivers.push({ code: 'RENDA_VOLATIL', weight: 1, value: Number(incomeVolatility.toFixed(2)) });
-  }
-
-  const severity = mapSeverity(score);
-  const debtBand = debtService >= 5000 ? 'alta' : debtService >= 1000 ? 'media' : 'baixa';
-  const highVolatility = incomeVolatility >= 0.35;
-
-  const shortActions = [
-    {
-      id: 'short-1',
-      horizon: 'short',
-      title: 'Mapear e congelar gastos não essenciais por 30 dias',
-      description: 'Concentre o corte em lazer e assinaturas para gerar alívio imediato de caixa.',
-      priority: 1,
-      status: 'nao_iniciada',
-      estimatedMonthlyImpact: Number((discretionaryExpenses * 0.25).toFixed(2))
-    },
-    {
-      id: 'short-2',
-      horizon: 'short',
-      title: debtBand === 'alta' ? 'Renegociar dívida com maior juros nesta semana' : 'Revisar parcelamentos ativos e datas de vencimento',
-      description: 'Priorize reduzir juros e alinhar vencimentos próximos da data de recebimento.',
-      priority: 2,
-      status: 'nao_iniciada',
-      estimatedMonthlyImpact: Number((debtService * 0.15).toFixed(2))
-    }
-  ];
-
-  const mediumActions = [
-    {
-      id: 'medium-1',
-      horizon: 'medium',
-      title: 'Adotar plano de quitação (avalanche)',
-      description: 'Direcione sobra mensal para dívidas com maior custo efetivo até reduzir o comprometimento da renda.',
-      priority: 1,
-      status: 'nao_iniciada',
-      estimatedMonthlyImpact: Number((debtService * 0.2).toFixed(2))
-    },
-    {
-      id: 'medium-2',
-      horizon: 'medium',
-      title: highVolatility ? 'Criar orçamento semanal flexível para renda variável' : 'Definir teto fixo por categoria e revisão quinzenal',
-      description: highVolatility
-        ? 'Divida o orçamento em envelopes semanais para reduzir risco de falta de caixa no fim do mês.'
-        : 'Ajuste hábitos com metas simples de gasto por categoria.',
-      priority: 2,
-      status: 'nao_iniciada',
-      estimatedMonthlyImpact: Number((discretionaryExpenses * 0.15).toFixed(2))
-    }
-  ];
-
-  const longActions = [
-    {
-      id: 'long-1',
-      horizon: 'long',
-      title: 'Construir reserva de emergência até 6 meses de despesas essenciais',
-      description: 'Após estabilização, automatize aportes para formar proteção financeira consistente.',
-      priority: 1,
-      status: 'nao_iniciada',
-      estimatedMonthlyImpact: Number((essentialExpenses * 0.1).toFixed(2))
-    },
-    {
-      id: 'long-2',
-      horizon: 'long',
-      title: 'Revisar metas patrimoniais e proteção financeira anual',
-      description: 'Consolide disciplina financeira com metas anuais e revisão de riscos.',
-      priority: 2,
-      status: 'nao_iniciada',
-      estimatedMonthlyImpact: 0
-    }
-  ];
-
-  const summary = severity >= 2
-    ? 'Percebemos sinais de pressão financeira. Vamos priorizar ações práticas para recuperar o equilíbrio com segurança.'
-    : 'Seu cenário está sob controle, mas há oportunidades de fortalecer sua segurança financeira.';
-
-  return {
-    generatedAt: new Date().toISOString(),
-    severity,
-    severityLabel: severityLabel(severity),
-    score,
-    summary,
-    metrics: {
-      rendaMedia: Number(incomeAvg.toFixed(2)),
-      despesasEssenciais: Number(essentialExpenses.toFixed(2)),
-      despesasDiscricionarias: Number(discretionaryExpenses.toFixed(2)),
-      comprometimentoRendaDivida: Number(crd.toFixed(2)),
-      saldoCaixaProjetado: Number(scp.toFixed(2)),
-      reservaMeses: Number(cashBufferMonths.toFixed(2)),
-      volatilidadeRenda: Number(incomeVolatility.toFixed(2))
-    },
-    drivers,
-    entryPoints: {
-      passive: {
-        shouldSurface: severity >= 2,
-        message: severity >= 2 ? 'Detectamos um momento de aperto. Abra seu plano de recuperação e foque nas ações de curto prazo.' : ''
-      },
-      active: {
-        title: 'Plano de Recuperação',
-        available: true
-      }
-    },
-    horizons: {
-      short: shortActions,
-      medium: mediumActions,
-      long: longActions
-    },
-    nextBestAction: shortActions[0]
-  };
+  return buildRecoveryPlanFromAnalysis(analysis);
 }
 
 function getCategoryTemplates(type, category) {
@@ -549,26 +386,6 @@ function upsertInvestmentFromReserve(transaction) {
   }
 }
 
-function hasImportedFingerprint(fingerprint) {
-  return transactions.some((item) => item.importFingerprint === fingerprint);
-}
-
-
-function buildImportedFileFingerprint({ fileName, content, importerKey, memberId, accountId, referencePeriod }) {
-  return crypto.createHash('sha256').update(JSON.stringify({
-    fileName: String(fileName || '').trim().toLowerCase(),
-    content: String(content || ''),
-    importerKey,
-    memberId,
-    accountId,
-    referencePeriod
-  })).digest('hex');
-}
-
-function findImportedFile(fileFingerprint) {
-  return importRegistry.find((item) => item.fileFingerprint === fileFingerprint) || null;
-}
-
 function buildImportedTransaction(previewItem) {
   return enrichTransaction({
     id: `imp-${Date.now()}-${Math.floor(Math.random() * 100000)}`,
@@ -587,7 +404,8 @@ function buildImportedTransaction(previewItem) {
     sourceFileName: previewItem.sourceFileName,
     referencePeriod: previewItem.referencePeriod,
     importFingerprint: previewItem.fingerprint,
-    importOrigin: previewItem.origin || 'manual-file'
+    importOrigin: previewItem.origin || 'manual-file',
+    categorization: previewItem.categorization || null
   });
 }
 
@@ -609,7 +427,7 @@ app.get('/api/family-members', (_req, res) => {
 });
 
 app.get('/api/categories', (_req, res) => {
-  res.json({ categories: expenseCategories, expenseCategories, incomeCategories, investmentCategories });
+  res.json({ categories: expenseCategories, expenseCategories, incomeCategories, investmentCategories, categorizationRules: explainCategorizationRules() });
 });
 
 app.get('/api/description-templates', (req, res) => {
@@ -633,6 +451,10 @@ app.get('/api/accounts', (_req, res) => {
   res.json({ accounts: listAvailableAccounts(transactions) });
 });
 
+app.get('/api/files', (_req, res) => {
+  res.json({ files: listAvailableFiles(transactions) });
+});
+
 app.get('/api/transactions', (req, res) => {
   const filtered = filterTransactions({
     month: req.query.month,
@@ -641,6 +463,7 @@ app.get('/api/transactions', (req, res) => {
     accountId: req.query.accountId || 'all',
     type: req.query.type || 'all',
     category: req.query.category || 'all',
+    fileName: req.query.fileName || 'all',
     from: req.query.from,
     to: req.query.to,
     term: req.query.term || 'all',
@@ -715,7 +538,8 @@ app.post('/api/imports/preview', (req, res) => {
       bankKeyHint: bankKey,
       accountIdHint: accountId,
       accountLabelHint: accountLabel,
-      referencePeriod
+      referencePeriod,
+      categoriesByType: { expense: expenseCategories, income: incomeCategories, investment: investmentCategories }
     });
 
     const fileFingerprint = buildImportedFileFingerprint({
@@ -726,7 +550,7 @@ app.post('/api/imports/preview', (req, res) => {
       accountId: preview.rows[0]?.accountId || accountId || '',
       referencePeriod: referencePeriod || preview.rows[0]?.referencePeriod || ''
     });
-    const duplicateFile = findImportedFile(fileFingerprint);
+    const duplicateFile = findImportedFile(importRegistry, fileFingerprint);
 
     return res.json({
       fileName: safeFileName,
@@ -736,10 +560,13 @@ app.post('/api/imports/preview', (req, res) => {
       bank: preview.importer,
       duplicateFile: Boolean(duplicateFile),
       duplicateFileMessage: duplicateFile ? 'Este arquivo já foi importado anteriormente para este membro/conta/período.' : '',
+      parserLayout: preview.parserLayout,
+      extractedTextPreview: preview.extractedTextPreview,
       rows: preview.rows,
       summary: {
         totalRows: preview.rows.length,
-        duplicates: preview.rows.filter((item) => hasImportedFingerprint(item.fingerprint)).length
+        duplicates: preview.rows.filter((item) => hasImportedFingerprint(transactions, item.fingerprint)).length,
+        categorizedAutomatically: preview.rows.filter((item) => item.categorization?.matchedBy === 'keyword').length
       }
     });
   } catch (err) {
@@ -773,7 +600,8 @@ app.post('/api/imports/commit', (req, res) => {
       bankKeyHint: bankKey,
       accountIdHint: accountId,
       accountLabelHint: accountLabel,
-      referencePeriod
+      referencePeriod,
+      categoriesByType: { expense: expenseCategories, income: incomeCategories, investment: investmentCategories }
     });
 
     const fileFingerprint = buildImportedFileFingerprint({
@@ -785,7 +613,7 @@ app.post('/api/imports/commit', (req, res) => {
       referencePeriod: referencePeriod || preview.rows[0]?.referencePeriod || ''
     });
 
-    if (findImportedFile(fileFingerprint)) {
+    if (findImportedFile(importRegistry, fileFingerprint)) {
       return res.status(409).json({ message: 'Este arquivo já foi processado anteriormente. Nenhum dado novo foi importado.' });
     }
 
@@ -796,7 +624,7 @@ app.post('/api/imports/commit', (req, res) => {
     const importedTransactionIds = [];
 
     for (const row of preview.rows) {
-      if (hasImportedFingerprint(row.fingerprint)) {
+      if (hasImportedFingerprint(transactions, row.fingerprint)) {
         duplicates += 1;
         ignored += 1;
         continue;
@@ -972,6 +800,7 @@ app.get('/api/dashboard', (req, res) => {
     accountId: req.query.accountId || 'all',
     type: req.query.type || 'all',
     category: req.query.category || 'all',
+    fileName: req.query.fileName || 'all',
     search: req.query.search || '',
     from: req.query.from,
     to: req.query.to,
@@ -987,6 +816,7 @@ app.get('/api/suggestions', (req, res) => {
     accountId: req.query.accountId || 'all',
     type: req.query.type || 'all',
     category: req.query.category || 'all',
+    fileName: req.query.fileName || 'all',
     search: req.query.search || '',
     from: req.query.from,
     to: req.query.to,
@@ -995,12 +825,42 @@ app.get('/api/suggestions', (req, res) => {
   res.json(buildSuggestions(dashboard));
 });
 
+app.get('/api/analysis/consolidated', (req, res) => {
+  const month = isValidMonth(req.query.month || '') ? req.query.month : undefined;
+  const analysis = buildConsolidatedAnalysis({
+    transactions,
+    members,
+    filters: {
+      month,
+      member: req.query.member || 'all',
+      bank: req.query.bank || 'all',
+      accountId: req.query.accountId || 'all',
+      fileName: req.query.fileName || 'all',
+      type: req.query.type || 'all',
+      category: req.query.category || 'all',
+      search: req.query.search || '',
+      from: req.query.from,
+      to: req.query.to,
+      term: req.query.term || 'all'
+    }
+  });
+  res.json(analysis);
+});
+
 app.get('/api/recovery/plan', (req, res) => {
   const month = isValidMonth(req.query.month || '') ? req.query.month : undefined;
-  const member = req.query.member || 'all';
-  const from = req.query.from || '';
-  const to = req.query.to || '';
-  const plan = buildRecoveryPlan({ month, member, from, to });
+  const plan = buildRecoveryPlan({
+    month,
+    member: req.query.member || 'all',
+    bank: req.query.bank || 'all',
+    accountId: req.query.accountId || 'all',
+    fileName: req.query.fileName || 'all',
+    from: req.query.from || '',
+    to: req.query.to || '',
+    type: req.query.type || 'all',
+    category: req.query.category || 'all',
+    search: req.query.search || ''
+  });
   res.json(plan);
 });
 

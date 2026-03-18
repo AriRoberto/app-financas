@@ -1,4 +1,7 @@
 import crypto from 'node:crypto';
+import { parseItauPdfRows } from '../parsers/itau-pdf-parser.js';
+import { parseBbCsvRows } from '../parsers/bb-csv-parser.js';
+import { parseItauCsvRows } from '../parsers/itau-csv-parser.js';
 
 const HEADER_ALIASES = {
   data: 'date',
@@ -10,9 +13,7 @@ const HEADER_ALIASES = {
   booked_at: 'date',
   lancamento_data: 'date',
   transaction_date: 'date',
-
   lancamento: 'description',
-
   descricao: 'description',
   descrição: 'description',
   historico: 'description',
@@ -23,9 +24,7 @@ const HEADER_ALIASES = {
   details: 'description',
   narrative: 'description',
   merchant_name: 'description',
-
   tipo_lancamento: 'entry_direction',
-
   valor: 'amount',
   valor_movimentado: 'amount',
   valor_lancamento: 'amount',
@@ -33,7 +32,6 @@ const HEADER_ALIASES = {
   transaction_amount: 'amount',
   amount_brl: 'amount',
   quantia: 'amount',
-
   debito_credito: 'entry_direction',
   debito_ou_credito: 'entry_direction',
   credito_debito: 'entry_direction',
@@ -41,18 +39,16 @@ const HEADER_ALIASES = {
   tipo_movimento: 'entry_direction',
   dc: 'entry_direction',
   d_c: 'entry_direction',
-
   categoria_lancamento: 'category',
   classe: 'category',
-
   vencimento: 'due_date',
   data_vencimento: 'due_date',
-
   agencia: 'agencia',
   agência: 'agencia',
   branch: 'agencia',
-  conta_corrente: 'conta',
-  numero_conta: 'conta',
+  conta_corrente: 'conta_corrente',
+  conta: 'conta',
+  numero_conta: 'conta_corrente',
   descricao_lancamento: 'description',
   valor_rs: 'amount',
   valor_r: 'amount',
@@ -79,55 +75,42 @@ function detectDelimiter(line) {
   let commas = 0;
   let semicolons = 0;
   let inQuotes = false;
-
   for (let i = 0; i < line.length; i += 1) {
     const char = line[i];
     const next = line[i + 1];
-
     if (char === '"' && inQuotes && next === '"') {
       i += 1;
       continue;
     }
-
     if (char === '"') {
       inQuotes = !inQuotes;
       continue;
     }
-
     if (!inQuotes && char === ',') commas += 1;
     if (!inQuotes && char === ';') semicolons += 1;
   }
-
   return semicolons > commas ? ';' : ',';
 }
 
 function getFirstCsvRecord(content) {
   let current = '';
   let inQuotes = false;
-
   for (let i = 0; i < content.length; i += 1) {
     const char = content[i];
     const next = content[i + 1];
-
     if (char === '"' && inQuotes && next === '"') {
       current += '"';
       i += 1;
       continue;
     }
-
     if (char === '"') {
       inQuotes = !inQuotes;
       current += char;
       continue;
     }
-
-    if (!inQuotes && (char === '\n' || char === '\r')) {
-      return current;
-    }
-
+    if (!inQuotes && (char === '\n' || char === '\r')) return current;
     current += char;
   }
-
   return current;
 }
 
@@ -146,9 +129,7 @@ function parseCsvRows(content, delimiter) {
 
   function pushRow() {
     const hasData = row.some((value) => value !== '');
-    if (hasData) {
-      rows.push({ values: row, line: rowStartLine });
-    }
+    if (hasData) rows.push({ values: row, line: rowStartLine });
     row = [];
     rowStartLine = line;
   }
@@ -156,23 +137,19 @@ function parseCsvRows(content, delimiter) {
   for (let i = 0; i < content.length; i += 1) {
     const char = content[i];
     const next = content[i + 1];
-
     if (char === '"' && inQuotes && next === '"') {
       current += '"';
       i += 1;
       continue;
     }
-
     if (char === '"') {
       inQuotes = !inQuotes;
       continue;
     }
-
     if (!inQuotes && char === delimiter) {
       pushCell();
       continue;
     }
-
     if (!inQuotes && char === '\r') {
       pushCell();
       pushRow();
@@ -181,7 +158,6 @@ function parseCsvRows(content, delimiter) {
       rowStartLine = line;
       continue;
     }
-
     if (!inQuotes && char === '\n') {
       pushCell();
       pushRow();
@@ -189,7 +165,6 @@ function parseCsvRows(content, delimiter) {
       rowStartLine = line;
       continue;
     }
-
     if (char === '\n') line += 1;
     current += char;
   }
@@ -198,7 +173,6 @@ function parseCsvRows(content, delimiter) {
     pushCell();
     pushRow();
   }
-
   return rows;
 }
 
@@ -207,11 +181,7 @@ function parseCsv(content) {
   const firstRecord = getFirstCsvRecord(sanitized);
   const delimiter = detectDelimiter(firstRecord);
   const rows = parseCsvRows(sanitized, delimiter);
-
-  if (rows.length < 2) {
-    throw new Error('CSV inválido: informe cabeçalho e ao menos uma linha.');
-  }
-
+  if (rows.length < 2) throw new Error('CSV inválido: informe cabeçalho e ao menos uma linha.');
   const headers = rows[0].values.map(normalizeHeader);
   return rows.slice(1).map(({ values, line }) => {
     const row = { __line: line, __delimiter: delimiter };
@@ -235,21 +205,30 @@ export function detectImportFormat(fileName, content) {
   if (safeName.endsWith('.csv')) return 'csv';
   if (safeName.endsWith('.json')) return 'json';
   if (safeName.endsWith('.ofx')) return 'ofx';
+  if (safeName.endsWith('.pdf')) return 'pdf';
 
   const trimmed = String(content || '').trim();
+  if (trimmed.startsWith('data:application/pdf;base64,')) return 'pdf';
+  if (trimmed.startsWith('%PDF')) return 'pdf';
   if (trimmed.startsWith('{') || trimmed.startsWith('[')) return 'json';
   if (trimmed.includes(',') || trimmed.includes(';')) return 'csv';
   return 'unknown';
 }
 
+function runFormatSpecificPostProcessing({ fileName, rows, format }) {
+  const safeName = String(fileName || '').toLowerCase();
+  if (format === 'csv' && safeName.includes('itau')) return parseItauCsvRows(rows);
+  if (format === 'csv') return parseBbCsvRows(rows);
+  return rows;
+}
+
 export function parseImportContent({ fileName, content }) {
   const format = detectImportFormat(fileName, content);
-  if (format === 'ofx') {
-    throw new Error('OFX ainda não suportado nesta primeira entrega. Use CSV ou JSON.');
-  }
-  if (format === 'csv') return { format, rows: parseCsv(content) };
+  if (format === 'ofx') throw new Error('OFX ainda não suportado nesta primeira entrega. Use CSV, PDF ou JSON.');
+  if (format === 'csv') return { format, rows: runFormatSpecificPostProcessing({ fileName, rows: parseCsv(content), format }) };
   if (format === 'json') return { format, rows: parseJson(content) };
-  throw new Error('Formato de arquivo não suportado. Use CSV ou JSON.');
+  if (format === 'pdf') return parseItauPdfRows(content);
+  throw new Error('Formato de arquivo não suportado. Use CSV, PDF ou JSON.');
 }
 
 export function buildImportFingerprint(payload) {
