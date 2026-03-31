@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CidadeAtende - MVP</title>
+    <style>
+      body { font-family: Arial, sans-serif; max-width: 900px; margin: 20px auto; padding: 0 12px; }
+      form { display: grid; gap: 8px; margin-bottom: 16px; }
+      input, select, textarea, button { padding: 10px; }
+      .card { border: 1px solid #ddd; border-radius: 8px; padding: 12px; margin-bottom: 10px; }
+      .status { font-weight: bold; }
+    </style>
+  </head>
+  <body>
+    <h1>CidadeAtende (MVP)</h1>
+    <p>Cadastro rápido + abertura de solicitação + acompanhamento de protocolos.</p>
+
+    <h2>1) Cadastro cidadão</h2>
+    <form id="registerForm">
+      <input id="nome" placeholder="Nome" required />
+      <input id="cpf" placeholder="CPF" required />
+      <input id="email" placeholder="E-mail" type="email" required />
+      <button type="submit">Cadastrar</button>
+    </form>
+    <p id="userInfo"></p>
+
+    <h2>2) Abrir solicitação</h2>
+    <form id="requestForm">
+      <select id="category" required>
+        <option value="ILUMINACAO_PUBLICA">Iluminação pública</option>
+        <option value="BURACO_EM_VIA">Buraco em via</option>
+        <option value="LIMPEZA_URBANA">Limpeza urbana</option>
+        <option value="MANUTENCAO_ESPACO_PUBLICO">Manutenção em espaço público</option>
+      </select>
+      <textarea id="descricao" placeholder="Descreva o problema" required></textarea>
+      <input id="endereco" placeholder="Endereço" />
+      <input id="latitude" type="number" step="any" placeholder="Latitude" required />
+      <input id="longitude" type="number" step="any" placeholder="Longitude" required />
+      <input id="fotoUrl" placeholder="URL da foto (opcional)" />
+      <button type="submit">Enviar solicitação</button>
+    </form>
+
+    <h2>3) Meus protocolos</h2>
+    <button id="refreshBtn">Atualizar lista</button>
+    <div id="list"></div>
+
+    <script>
+      const api = '/api';
+      const key = 'amsUser';
+
+      const userInfo = document.getElementById('userInfo');
+      const list = document.getElementById('list');
+
+      function getUser() {
+        const raw = localStorage.getItem(key);
+        return raw ? JSON.parse(raw) : null;
+      }
+
+      function setUser(user) {
+        localStorage.setItem(key, JSON.stringify(user));
+        userInfo.textContent = `Cidadão: ${user.nome} | ID: ${user.id}`;
+      }
+
+      async function loadRequests() {
+        const user = getUser();
+        if (!user) return;
+        const res = await fetch(`${api}/requests?userId=${user.id}`);
+        const items = await res.json();
+        list.innerHTML = items.map((item) => `
+          <div class="card">
+            <div><strong>Protocolo:</strong> ${item.protocol}</div>
+            <div><strong>Categoria:</strong> ${item.category}</div>
+            <div><strong>Descrição:</strong> ${item.descricao}</div>
+            <div class="status"><strong>Status:</strong> ${item.status}</div>
+            <div><strong>Atualizado em:</strong> ${new Date(item.updatedAt).toLocaleString()}</div>
+          </div>
+        `).join('') || '<p>Sem solicitações.</p>';
+      }
+
+      document.getElementById('registerForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const body = {
+          nome: document.getElementById('nome').value,
+          cpf: document.getElementById('cpf').value,
+          email: document.getElementById('email').value
+        };
+        const res = await fetch(`${api}/auth/register`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+        });
+        const data = await res.json();
+        if (!res.ok && data.user) {
+          setUser(data.user);
+          return alert('Usuário já existente, sessão carregada.');
+        }
+        if (!res.ok) return alert(data.message || 'Erro no cadastro');
+        setUser(data.user);
+      });
+
+      document.getElementById('requestForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const user = getUser();
+        if (!user) return alert('Cadastre o cidadão primeiro.');
+        const body = {
+          userId: user.id,
+          category: document.getElementById('category').value,
+          descricao: document.getElementById('descricao').value,
+          endereco: document.getElementById('endereco').value,
+          latitude: Number(document.getElementById('latitude').value),
+          longitude: Number(document.getElementById('longitude').value),
+          fotoUrl: document.getElementById('fotoUrl').value
+        };
+        const res = await fetch(`${api}/requests`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+        });
+        const data = await res.json();
+        if (!res.ok) return alert(data.message || 'Erro ao abrir solicitação');
+        alert(`Solicitação criada: ${data.protocol}`);
+        loadRequests();
+      });
+
+      document.getElementById('refreshBtn').addEventListener('click', loadRequests);
+
+      const current = getUser();
+      if (current) {
+        setUser(current);
+        loadRequests();
+      }
+    </script>
+  </body>
+</html>
