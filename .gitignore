@@ -1,0 +1,21 @@
+# Environment secrets (never commit)
+.env
+backend/.env
+
+# Dependencies
+node_modules/
+backend/node_modules/
+!backend/node_modules/cors/
+!backend/node_modules/cors/**
+!backend/node_modules/express/
+!backend/node_modules/express/**
+frontend/node_modules/
+
+# Build outputs
+frontend/dist/
+
+# Local persisted app data
+backend/data/finance-state.json
+
+# Mistaken external project folder (kept out of this repo)
+municipal-app/
