@@ -174,3 +174,7 @@ SYNC_DEFAULT_DAYS=90
 - `POST https://api.pluggy.ai/auth`
 - `POST https://api.pluggy.ai/connect_token`
 - `GET https://api.pluggy.ai/connectors`
+
+## Publicação GitHub (Opção 1)
+- Script: `scripts/opcao1-publicar-github.sh`
+- Exemplo: `./scripts/opcao1-publicar-github.sh https://github.com/AriRoberto/app-ams.git main`
